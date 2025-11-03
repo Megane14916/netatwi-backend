@@ -12,23 +12,45 @@ from sqlalchemy import func, case, distinct
 from sqlalchemy.orm import joinedload
 
 load_dotenv()
-os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+
+# --- 環境変数の読み込みと検証 ---
+# Renderで設定した環境変数を読み込む
+db_uri = os.environ.get('SQLALCHEMY_DATABASE_URI')
+secret_key = os.environ.get('SECRET_KEY')
+frontend_url = os.environ.get('FRONTEND_URL') #例: "https://netatwi-frontend.vercel.app"
+backend_url = os.environ.get('RENDER_EXTERNAL_URL') # Renderが自動で設定するURL
+
+# 開発環境（ローカル）でのフォールバック
+is_local_dev = not backend_url 
+if is_local_dev:
+    os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+    db_uri = db_uri or 'sqlite:///project.db'
+    secret_key = secret_key or 'a-very-secret-key'
+    frontend_url = frontend_url or 'http://localhost:3000'
+    backend_url = 'http://127.0.0.1:5001'
+
+if not db_uri:
+    raise ValueError("FATAL_ERROR: SQLALCHEMY_DATABASE_URI environment variable is not set.")
+if not secret_key:
+    raise ValueError("FATAL_ERROR: SECRET_KEY environment variable is not set.")
 
 app = Flask(__name__)
 
 # --- アプリケーション設定 ---
 app.config.update(
-    SECRET_KEY=os.environ.get('SECRET_KEY', 'a-very-secret-key-that-is-secure'),
-    SQLALCHEMY_DATABASE_URI=os.environ.get('SQLALCHEMY_DATABASE_URI', 'sqlite:///project.db'),
+    SECRET_KEY=secret_key,
+    SQLALCHEMY_DATABASE_URI=db_uri,
     SESSION_COOKIE_SAMESITE='Lax',
-    # クッキーが localhost ドメイン用であることを明示
-    SESSION_COOKIE_DOMAIN='localhost',
-    SESSION_COOKIE_SECURE=False
+    # SESSION_COOKIE_DOMAIN='localhost', # <-- この行を削除
+    SESSION_COOKIE_SECURE= not is_local_dev # 本番環境(https=True)とローカル(http=False)を自動判定
 )
 
 JST = timezone(timedelta(hours=9), 'JST')
 
-CORS(app, supports_credentials=True, origins=["http://localhost:3000"])
+# --- CORS設定 (最重要) ---
+# 環境変数から読み取ったフロントエンドのURLを許可する
+CORS(app, supports_credentials=True, origins=[frontend_url])
+# ---
 db.init_app(app)
 migrate = Migrate(app, db)
 
@@ -43,11 +65,10 @@ USER_INFO_URL = "https://api.twitter.com/1.1/account/verify_credentials.json"
 @app.route("/api/login/twitter")
 def twitter_login():
     try:
-        # プロキシ経由で正しいURLをXに伝える
-        callback_url = url_for('twitter_callback', _external=False)
-        full_callback_url = f"http://localhost:3000{callback_url}"
+        # RenderのURL(backend_url)を使ってコールバックURLを正しく生成
+        callback_url = f"{backend_url}{url_for('twitter_callback')}"
 
-        twitter = OAuth1Session(X_CONSUMER_KEY, client_secret=X_CONSUMER_SECRET, callback_uri=full_callback_url)
+        twitter = OAuth1Session(X_CONSUMER_KEY, client_secret=X_CONSUMER_SECRET, callback_uri=callback_url)
         response = twitter.fetch_request_token(REQUEST_TOKEN_URL)
         session['oauth_token'] = response.get("oauth_token")
         session['oauth_token_secret'] = response.get("oauth_token_secret")
@@ -64,7 +85,7 @@ def twitter_callback():
     verifier = request.args.get('oauth_verifier')
 
     if not all([oauth_token, oauth_token_secret, verifier]):
-        return redirect("http://localhost:3000?login_error=session_token_missing")
+        return redirect(f"{frontend_url}?login_error=session_token_missing") # frontend_url を使用
 
     try:
         oauth_session = OAuth1Session(
@@ -104,9 +125,9 @@ def twitter_callback():
         print(f"!!! ERROR at /api/callback/twitter: {e}")
         traceback.print_exc()
         db.session.rollback()
-        return redirect("http://localhost:3000?login_error=callback_failed")
+        return redirect(f"{frontend_url}?login_error=callback_failed") # frontend_url を使用
     
-    return redirect("http://localhost:3000")
+    return redirect(frontend_url) # frontend_url を使用
 
 # (以降のコードは変更ありません)
 # ...
