@@ -40,9 +40,9 @@ app = Flask(__name__)
 app.config.update(
     SECRET_KEY=secret_key,
     SQLALCHEMY_DATABASE_URI=db_uri,
-    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SAMESITE='None',
     # SESSION_COOKIE_DOMAIN='localhost', # <-- この行を削除
-    SESSION_COOKIE_SECURE= not is_local_dev # 本番環境(https=True)とローカル(http=False)を自動判定
+    SESSION_COOKIE_SECURE= True # 本番環境(https=True)とローカル(http=False)を自動判定
 )
 
 JST = timezone(timedelta(hours=9), 'JST')
