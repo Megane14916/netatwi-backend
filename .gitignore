@@ -1,8 +1,9 @@
+#.gcloudignore
+
+.git
+.gitignore
 venv/
 pycache/
 *.pyc
 *.db
-.db-journal
-.env
-.DS_Store
-*.swp
+*.env
