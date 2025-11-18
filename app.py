@@ -18,16 +18,20 @@ load_dotenv()
 db_uri = os.environ.get('SQLALCHEMY_DATABASE_URI')
 secret_key = os.environ.get('SECRET_KEY')
 frontend_url = os.environ.get('FRONTEND_URL') #例: "https://netatwi-frontend.vercel.app"
-backend_url = os.environ.get('RENDER_EXTERNAL_URL') # Renderが自動で設定するURL
+gcp_backend_url = os.environ.get('GCR_URL') # GCPで設定したCloud RunのURL
 
-# 開発環境（ローカル）でのフォールバック
-is_local_dev = not backend_url 
+# FLASK_DEBUGがTrueの場合 (ローカルの.envファイル) のみローカル開発とみなす
+is_local_dev = os.environ.get('FLASK_DEBUG') == 'True' 
+backend_url = 'http://127.0.0.1:5001' # ローカルのFlask URL
+
 if is_local_dev:
     os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
     db_uri = db_uri or 'sqlite:///project.db'
-    secret_key = secret_key or 'a-very-secret-key'
+    secret_key = secret_key or 'a-very-secret-key-for-local-dev'
     frontend_url = frontend_url or 'http://localhost:3000'
-    backend_url = 'http://127.0.0.1:5001'
+else:
+    # 本番環境(GCP)では、GCR_URLを使用
+    backend_url = gcp_backend_url
 
 if not db_uri:
     raise ValueError("FATAL_ERROR: SQLALCHEMY_DATABASE_URI environment variable is not set.")
