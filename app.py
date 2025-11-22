@@ -438,6 +438,16 @@ def submit_post(id):
         return jsonify({"error": "投稿内容がありません。"}), 400
 
     try:
+        contest = Contest.query.get_or_404(id)
+        now = datetime.now(timezone.utc)
+        
+        # DB時刻をUTC awareに変換して比較
+        start_time_aware = contest.start_time.replace(tzinfo=timezone.utc)
+        end_time_aware = contest.end_time.replace(tzinfo=timezone.utc)
+
+        if not (start_time_aware <= now < end_time_aware):
+            return jsonify({"error": "現在は投稿受付期間外です。"}), 403
+        
         existing_post = Post.query.filter_by(user_id=user_id, contest_id=id).first()
         if existing_post:
             return jsonify({"error": "この大会には既に投稿済みです。"}), 409
