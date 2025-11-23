@@ -1,5 +1,6 @@
 import os
 import traceback
+import logging
 from flask import Flask, jsonify, session, request, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -79,30 +80,79 @@ AUTHORIZE_URL = "https://api.twitter.com/oauth/authorize"
 ACCESS_TOKEN_URL = "https://api.twitter.com/oauth/access_token"
 USER_INFO_URL = "https://api.twitter.com/1.1/account/verify_credentials.json"
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+@app.before_request
+def log_request_info():
+    # ログイン関連のパスのみ詳細ログを出力
+    if request.path.startswith("/api/login") or request.path.startswith("/api/callback"):
+        logger.info(f"=== REQUEST START: {request.path} ===")
+        logger.info(f"Headers: {dict(request.headers)}")
+        logger.info(f"Cookies sent from browser: {request.cookies}")
+        logger.info(f"Session (before processing): {dict(session)}")
+        # プロキシヘッダーの確認
+        logger.info(f"X-Forwarded-Proto: {request.headers.get('X-Forwarded-Proto')}")
+        logger.info(f"Is Secure (Flask detected): {request.is_secure}")
+
+# --- X OAuth Login ---
+X_CONSUMER_KEY = os.environ.get("X_CONSUMER_KEY")
+X_CONSUMER_SECRET = os.environ.get("X_CONSUMER_SECRET")
+REQUEST_TOKEN_URL = "https://api.twitter.com/oauth/request_token"
+AUTHORIZE_URL = "https://api.twitter.com/oauth/authorize"
+ACCESS_TOKEN_URL = "https://api.twitter.com/oauth/access_token"
+USER_INFO_URL = "https://api.twitter.com/1.1/account/verify_credentials.json"
+
 @app.route("/api/login/twitter")
 def twitter_login():
     try:
-        # RenderのURL(backend_url)を使ってコールバックURLを正しく生成
+        # 強制的にHTTPSスキームでコールバックURLを生成
         callback_url = url_for('twitter_callback', _external=True, _scheme='https')
+        
+        # 念のためhttpが含まれていたら置換
+        if callback_url.startswith("http://"):
+            callback_url = callback_url.replace("http://", "https://", 1)
+
+        logger.info(f"Generated Callback URL: {callback_url}")
 
         twitter = OAuth1Session(X_CONSUMER_KEY, client_secret=X_CONSUMER_SECRET, callback_uri=callback_url)
         response = twitter.fetch_request_token(REQUEST_TOKEN_URL)
+        
+        # セッションにトークンを保存
         session['oauth_token'] = response.get("oauth_token")
         session['oauth_token_secret'] = response.get("oauth_token_secret")
+        
+        logger.info(f"Saved to session - Token: {session.get('oauth_token')}")
+        
         authorization_url = twitter.authorization_url(AUTHORIZE_URL)
         return jsonify({'authorization_url': authorization_url})
     except Exception as e:
-        print(f"!!! ERROR at /api/login/twitter: {e}")
+        logger.error(f"!!! ERROR at /api/login/twitter: {e}")
+        traceback.print_exc()
         return jsonify({"error": "Failed to connect to Twitter"}), 500
 
 @app.route('/api/callback/twitter')
 def twitter_callback():
+    logger.info(f"=== CALLBACK START ===")
+    logger.info(f"Session keys present: {list(session.keys())}")
+
     oauth_token = session.pop('oauth_token', None)
     oauth_token_secret = session.pop('oauth_token_secret', None)
     verifier = request.args.get('oauth_verifier')
 
+    logger.info(f"Retrieved from session - Token: {oauth_token}, Verifier: {verifier}")
+
+
     if not all([oauth_token, oauth_token_secret, verifier]):
-        return redirect(f"{frontend_url}?login_error=session_token_missing") # frontend_url を使用
+        logger.error("Missing token or verifier in callback.")
+        # エラーの詳細をクエリパラメータに付与してリダイレクト
+        if not oauth_token:
+            reason = "session_token_missing"
+        elif not verifier:
+            reason = "verifier_missing"
+        else:
+            reason = "unknown_missing"
+        return redirect(f"{frontend_url}?login_error={reason}") # frontend_url を使用
 
     try:
         oauth_session = OAuth1Session(
@@ -138,6 +188,9 @@ def twitter_callback():
         session['user_id'] = user.id
         session['screen_name'] = user.screen_name
         session['profile_image_url'] = user.profile_image_url
+
+        logger.info(f"Login successful for user: {user.screen_name}")
+
     except Exception as e:
         print(f"!!! ERROR at /api/callback/twitter: {e}")
         traceback.print_exc()
