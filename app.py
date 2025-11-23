@@ -20,7 +20,7 @@ load_dotenv()
 # Renderで設定した環境変数を読み込む
 db_uri = os.environ.get('SQLALCHEMY_DATABASE_URI')
 secret_key = os.environ.get('SECRET_KEY')
-frontend_url = os.environ.get('FRONTEND_URL') #例: "https://netatwi-frontend.vercel.app"
+frontend_url = os.environ.get('FRONTEND_URL').rstrip('/') #例: "https://netatwi-frontend.vercel.app"
 gcp_backend_url = os.environ.get('GCR_URL') # GCPで設定したCloud RunのURL
 
 # FLASK_DEBUGがTrueの場合 (ローカルの.envファイル) のみローカル開発とみなす
@@ -107,7 +107,7 @@ USER_INFO_URL = "https://api.twitter.com/1.1/account/verify_credentials.json"
 def twitter_login():
     try:
         # 強制的にHTTPSスキームでコールバックURLを生成
-        callback_url = url_for('twitter_callback', _external=True, _scheme='https')
+        callback_url = f"{frontend_url}/api/callback/twitter"
         
         # 念のためhttpが含まれていたら置換
         if callback_url.startswith("http://"):
@@ -121,6 +121,8 @@ def twitter_login():
         # セッションにトークンを保存
         session['oauth_token'] = response.get("oauth_token")
         session['oauth_token_secret'] = response.get("oauth_token_secret")
+
+        session.modified = True
         
         logger.info(f"Saved to session - Token: {session.get('oauth_token')}")
         
