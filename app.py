@@ -42,11 +42,20 @@ app = Flask(__name__)
 
 # --- アプリケーション設定 ---
 app.config.update(
-    SECRET_KEY=secret_key,
-    SQLALCHEMY_DATABASE_URI=db_uri,
-    SESSION_COOKIE_SAMESITE='None',
-    # SESSION_COOKIE_DOMAIN='localhost', # <-- この行を削除
-    SESSION_COOKIE_SECURE= True # 本番環境(https=True)とローカル(http=False)を自動判定
+    SECRET_KEY=os.environ.get('SECRET_KEY', 'a-very-secret-key-that-is-secure'),
+    SQLALCHEMY_DATABASE_URI=os.environ.get('SQLALCHEMY_DATABASE_URI', 'sqlite:///project.db'),
+    
+    # SameSite属性は 'Lax' でOK（CSRF保護のため）
+    SESSION_COOKIE_SAMESITE='Lax',
+    
+    # localhost環境でのトラブルを避けるため、DOMAIN指定を削除
+    # SESSION_COOKIE_DOMAIN='localhost', 
+    
+    # 【変更】HTTPS環境向けに True に設定
+    # ※ 注意: http://localhost で動かす場合、ブラウザがCookieを送信しなくなるため
+    #   ログインセッションが維持できなくなる可能性があります。
+    #   ローカル開発で動作させる場合は False に戻すか、localhostをhttps化してください。
+    SESSION_COOKIE_SECURE=True
 )
 
 JST = timezone(timedelta(hours=9), 'JST')
