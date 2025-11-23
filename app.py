@@ -10,6 +10,8 @@ from models import db, User, Contest, Post, Vote, Bookmark
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import func, case, distinct
 from sqlalchemy.orm import joinedload
+from werkzeug.middleware.proxy_fix import ProxyFix
+
 
 load_dotenv()
 
@@ -39,6 +41,8 @@ if not secret_key:
     raise ValueError("FATAL_ERROR: SECRET_KEY environment variable is not set.")
 
 app = Flask(__name__)
+
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 # --- アプリケーション設定 ---
 app.config.update(
