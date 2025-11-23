@@ -672,60 +672,87 @@ def judge_login(id):
 @app.route('/api/profile/<string:screen_name>')
 def get_user_profile(screen_name):
     try:
-        # --- ▼▼▼ 修正点 ▼▼▼ ---
-        # first_or_404() から first() に変更
+        # 1. 閲覧者の特定 (ログインしていれば)
+        viewer_id = session.get('user_id')
+
+        # 2. プロフィール対象ユーザーの特定
         target_user = User.query.filter_by(screen_name=screen_name).first()
-        
-        # ユーザーが見つからなかった場合、404 JSONを返す
         if not target_user:
             return jsonify({"error": "ユーザーが見つかりません。"}), 404
-        # --- ▲▲▲ ここまで ▲▲▲ ---
         
         user_id = target_user.id
-
-        # (以降のロジックは変更なし)
-        user_posts_query = Post.query.filter_by(user_id=user_id).options(joinedload(Post.contest), joinedload(Post.user)).order_by(Post.created_at.desc()).all()
-        profile_posts_data = []
-        results_cache = {}
-        now = datetime.now(timezone.utc)
         
-        for post in user_posts_query:
-            contest = post.contest
-            contest_id = contest.id
-            rank = None
-            score = None
-            voting_end_time_aware = contest.voting_end_time.replace(tzinfo=timezone.utc)
-            if now >= voting_end_time_aware:
-                if contest_id not in results_cache: results_cache[contest_id] = calculate_contest_results(contest_id) or {}
-                post_result = results_cache[contest_id].get(post.id)
-                if post_result: rank, score = post_result['rank'], post_result['score']
-            profile_posts_data.append({
-                'post_id': post.id, 'content': post.content,
-                'created_at': post.created_at.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
-                'contest': { 'id': contest.id, 'name': contest.name, 'theme': contest.theme },
-                'user': { 'screen_name': post.user.screen_name, 'profile_image_url': post.user.profile_image_url },
-                'rank': rank, 'score': score
-            })
+        # 3. 共通の現在時刻
+        now = datetime.now(timezone.utc)
+        results_cache = {} # 計算結果のキャッシュ
 
-        bookmarked_posts_query = db.session.query(Post).join(Bookmark, Post.id == Bookmark.post_id).filter(Bookmark.user_id == user_id).options(joinedload(Post.user), joinedload(Post.contest)).order_by(Bookmark.created_at.desc()).all()
-        bookmarks_data = []
-        for post in bookmarked_posts_query:
-            contest = post.contest
-            contest_id = contest.id
-            rank = None
-            score = None
-            voting_end_time_aware = contest.voting_end_time.replace(tzinfo=timezone.utc)
-            if now >= voting_end_time_aware:
-                if contest_id not in results_cache: results_cache[contest_id] = calculate_contest_results(contest_id) or {}
+        # --- ヘルパー: 投稿データ整形関数 ---
+        def format_posts(posts_query_result):
+            formatted_data = []
+            
+            # 表示対象となる投稿IDを収集（一括クエリ用）
+            target_post_ids = []
+            temp_posts = []
+
+            for post in posts_query_result:
+                contest = post.contest
+                voting_end_time_aware = contest.voting_end_time.replace(tzinfo=timezone.utc)
+                
+                # 結果が出ていない大会の投稿は除外
+                if now < voting_end_time_aware:
+                    continue
+                
+                target_post_ids.append(post.id)
+                temp_posts.append(post)
+
+            if not target_post_ids:
+                return []
+
+            # ブックマーク数の一括取得
+            bookmark_counts_query = db.session.query(Bookmark.post_id, func.count(Bookmark.id)).filter(Bookmark.post_id.in_(target_post_ids)).group_by(Bookmark.post_id).all()
+            bookmark_counts_map = {pid: count for pid, count in bookmark_counts_query}
+
+            # 閲覧者のブックマーク状況の一括取得
+            viewer_bookmarks_set = set()
+            if viewer_id:
+                viewer_bookmarks_query = db.session.query(Bookmark.post_id).filter(Bookmark.user_id == viewer_id, Bookmark.post_id.in_(target_post_ids)).all()
+                viewer_bookmarks_set = {pid for (pid,) in viewer_bookmarks_query}
+
+            for post in temp_posts:
+                contest_id = post.contest_id
+                
+                # ランキング情報の取得（キャッシュ利用）
+                if contest_id not in results_cache:
+                     results_cache[contest_id] = calculate_contest_results(contest_id) or {}
+                
+                rank = None
+                score = 0
                 post_result = results_cache[contest_id].get(post.id)
-                if post_result: rank, score = post_result['rank'], post_result['score']
-            bookmarks_data.append({
-                'post_id': post.id, 'content': post.content,
-                'created_at': post.created_at.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
-                'contest': { 'id': contest.id, 'name': contest.name, 'theme': contest.theme },
-                'user': { 'screen_name': post.user.screen_name, 'profile_image_url': post.user.profile_image_url },
-                'rank': rank, 'score': score
-            })
+                if post_result:
+                    rank = post_result['rank']
+                    score = post_result['score']
+
+                formatted_data.append({
+                    'post_id': post.id,
+                    'content': post.content,
+                    'created_at': post.created_at.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
+                    'contest': { 'id': post.contest.id, 'name': post.contest.name, 'theme': post.contest.theme },
+                    'user': { 'screen_name': post.user.screen_name, 'profile_image_url': post.user.profile_image_url },
+                    'rank': rank,
+                    'score': score,
+                    'bookmarkCount': bookmark_counts_map.get(post.id, 0),
+                    'isBookmarked': post.id in viewer_bookmarks_set
+                })
+            
+            return formatted_data
+
+        # 4. ユーザーの投稿を取得
+        user_posts_raw = Post.query.filter_by(user_id=user_id).options(joinedload(Post.contest), joinedload(Post.user)).order_by(Post.created_at.desc()).all()
+        profile_posts_data = format_posts(user_posts_raw)
+
+        # 5. ユーザーがブックマークした投稿を取得
+        bookmarked_posts_raw = db.session.query(Post).join(Bookmark, Post.id == Bookmark.post_id).filter(Bookmark.user_id == user_id).options(joinedload(Post.user), joinedload(Post.contest)).order_by(Bookmark.created_at.desc()).all()
+        bookmarks_data = format_posts(bookmarked_posts_raw)
 
         return jsonify({
             'user': { 'id': target_user.id, 'screen_name': target_user.screen_name, 'profile_image_url': target_user.profile_image_url },
