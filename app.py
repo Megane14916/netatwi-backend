@@ -49,6 +49,11 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=0, x_prefix=0)
 app.config.update(
     SECRET_KEY=os.environ.get('SECRET_KEY', 'a-very-secret-key-that-is-secure'),
     SQLALCHEMY_DATABASE_URI=os.environ.get('SQLALCHEMY_DATABASE_URI', 'sqlite:///project.db'),
+
+    SQLALCHEMY_ENGINE_OPTIONS={
+        "pool_pre_ping": True,
+        "pool_recycle": 300, # 5分ごとに接続をリサイクル（念のため）
+    },
     
     # SameSite属性は 'Lax' でOK（CSRF保護のため）
     SESSION_COOKIE_SAMESITE='None',
