@@ -42,7 +42,7 @@ if not secret_key:
 
 app = Flask(__name__)
 
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=0, x_prefix=0)
 
 # --- アプリケーション設定 ---
 app.config.update(
@@ -50,7 +50,7 @@ app.config.update(
     SQLALCHEMY_DATABASE_URI=os.environ.get('SQLALCHEMY_DATABASE_URI', 'sqlite:///project.db'),
     
     # SameSite属性は 'Lax' でOK（CSRF保護のため）
-    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SAMESITE='None',
     
     # localhost環境でのトラブルを避けるため、DOMAIN指定を削除
     # SESSION_COOKIE_DOMAIN='localhost', 
@@ -83,7 +83,7 @@ USER_INFO_URL = "https://api.twitter.com/1.1/account/verify_credentials.json"
 def twitter_login():
     try:
         # RenderのURL(backend_url)を使ってコールバックURLを正しく生成
-        callback_url = f"{backend_url}{url_for('twitter_callback')}"
+        callback_url = url_for('twitter_callback', _external=True, _scheme='https')
 
         twitter = OAuth1Session(X_CONSUMER_KEY, client_secret=X_CONSUMER_SECRET, callback_uri=callback_url)
         response = twitter.fetch_request_token(REQUEST_TOKEN_URL)
@@ -223,7 +223,17 @@ def get_current_user():
 @app.route('/api/logout')
 def logout():
     session.clear()
-    return jsonify({'message': 'Logged out successfully'})
+    response = jsonify({'message': 'Logged out successfully'})
+    
+    # 【修正】念のため明示的にCookie削除ヘッダーを付与
+    # session.clear() でも行われますが、属性（SameSite等）を一致させて確実に削除します
+    session_cookie_name = app.config.get('SESSION_COOKIE_NAME', 'session')
+    response.delete_cookie(
+        session_cookie_name,
+        secure=app.config.get('SESSION_COOKIE_SECURE'),
+        samesite=app.config.get('SESSION_COOKIE_SAMESITE')
+    )
+    return response
 
 @app.route('/api/admin/contests', methods=['POST'])
 def create_contest():
