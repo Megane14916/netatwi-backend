@@ -577,7 +577,8 @@ def submit_votes(id):
     
     user_id = session['user_id']
     data = request.get_json()
-    votes_to_submit = data.get('votes') # { "postId": count, ... }
+    votes_to_submit = data.get('votes') # { "postId": count }
+    judge_award = data.get('judgeAward') # { "postId": 123, "comment": "..." } or null
 
     if not isinstance(votes_to_submit, dict):
          return jsonify({"error": "Invalid vote data"}), 400
@@ -586,12 +587,12 @@ def submit_votes(id):
         judge_contest_ids = session.get('judge_for_contest_ids', [])
         is_judge_voting_now = id in judge_contest_ids
         
-        # 一般投票は1回のみ（再投票不可）。審査員は何度でも修正可能とするか？ -> 今回は一般のみ制限
+        # 一般投票は1回のみ
         if not is_judge_voting_now:
             if Vote.query.filter_by(user_id=user_id, contest_id=id).first():
                  return jsonify({"error": "Already voted"}), 409
         else:
-            # 審査員の場合、既存の投票を一旦削除して上書きする（修正可能にするため）
+            # 審査員の場合、既存の投票(賞含む)を全て削除して再登録
              Vote.query.filter_by(user_id=user_id, contest_id=id).delete()
 
         # 期間チェック
@@ -600,28 +601,44 @@ def submit_votes(id):
         if not (c.end_time.replace(tzinfo=timezone.utc) <= now < c.voting_end_time.replace(tzinfo=timezone.utc)):
              return jsonify({"error": "Outside period"}), 403
 
-        # 投票内容のバリデーションと保存
+        # --- 投票データの保存 ---
+        # 1. 点数投票の保存
+        processed_post_ids = set()
         for pid_str, count in votes_to_submit.items():
             try:
                 post_id = int(pid_str)
-                
-                # 一般: 0 or 1, 審査員: 0~10
                 if is_judge_voting_now:
-                    if not (0 <= count <= 10): raise ValueError("Judge vote must be 0-10")
+                    if not (0 <= count <= 10): raise ValueError
                 else:
-                    if count not in (0, 1): raise ValueError("General vote must be 0 or 1")
+                    if count not in (0, 1): raise ValueError
                 
-                # 0の場合はDBに保存しない（投票なし）
-                if count > 0:
+                # 審査員賞の対象かどうか
+                is_award = False
+                comment = None
+                if is_judge_voting_now and judge_award and judge_award.get('postId') == post_id:
+                    is_award = True
+                    comment = judge_award.get('comment')
+
+                # 投票数が正、または審査員賞であれば保存
+                if count > 0 or is_award:
                     db.session.add(Vote(
-                        user_id=user_id,
-                        post_id=post_id,
-                        contest_id=id,
-                        count=count,
-                        is_judge_vote=is_judge_voting_now
+                        user_id=user_id, post_id=post_id, contest_id=id,
+                        count=count, is_judge_vote=is_judge_voting_now,
+                        is_judge_award=is_award, judge_comment=comment
                     ))
-            except (ValueError, TypeError):
-                 continue # 不正な値はスキップ
+                    processed_post_ids.add(post_id)
+            except (ValueError, TypeError): continue
+
+        # 2. 審査員賞が選択されているが、点数が0点(votesに含まれない/0)の場合のフォロー
+        if is_judge_voting_now and judge_award:
+            award_pid = judge_award.get('postId')
+            if award_pid and award_pid not in processed_post_ids:
+                # 0点で賞だけあげるケース
+                db.session.add(Vote(
+                    user_id=user_id, post_id=award_pid, contest_id=id,
+                    count=0, is_judge_vote=True,
+                    is_judge_award=True, judge_comment=judge_award.get('comment')
+                ))
 
         db.session.commit()
         return jsonify({"message": "Voted"}), 200
@@ -633,42 +650,53 @@ def submit_votes(id):
 @app.route('/api/contests/<int:id>/results')
 def get_contest_results(id):
     try:
-        user_id = session.get('user_id') # ログインユーザーID
-        contest = Contest.query.get_or_404(id)
-        now = datetime.now(timezone.utc)
-        voting_end_time_aware = contest.voting_end_time.replace(tzinfo=timezone.utc)
+        user_id = session.get('user_id'); c = Contest.query.get_or_404(id); now = datetime.now(timezone.utc)
+        if now < c.voting_end_time.replace(tzinfo=timezone.utc): return jsonify({"error": "Voting ongoing"}), 403
+        
+        all_posts = Post.query.options(joinedload(Post.user)).filter(Post.contest_id == id).all()
+        if not all_posts: return jsonify({'contest': {'id': c.id, 'name': c.name, 'theme': c.theme}, 'results': [], 'judgeAwards': [], 'totalPosters': 0, 'totalVoters': 0})
+        
+        contest_results = calculate_contest_results(id) or {}
+        
+        # --- 審査員賞の取得 ---
+        judge_awards_query = db.session.query(Vote, User, Post).join(User, Vote.user_id == User.id).join(Post, Vote.post_id == Post.id).filter(Vote.contest_id == id, Vote.is_judge_award == True).all()
+        judge_awards_data = []
+        award_badges = {} # post_id -> ["審査員名賞", ...]
 
-        if now < voting_end_time_aware:
-             return jsonify({"error": "まだ投票期間中です。"}), 403
+        for vote, judge_user, post in judge_awards_query:
+            award_name = f"{judge_user.screen_name}賞"
+            # 結果リスト表示用バッジ
+            if post.id not in award_badges: award_badges[post.id] = []
+            award_badges[post.id].append(award_name)
+            
+            # 審査員賞タブ表示用データ
+            judge_awards_data.append({
+                'judge': { 'screen_name': judge_user.screen_name, 'profile_image_url': judge_user.profile_image_url },
+                'comment': vote.judge_comment,
+                'post': {
+                    'post_id': post.id,
+                    'content': post.content,
+                    'user': { 'screen_name': post.user.screen_name, 'profile_image_url': post.user.profile_image_url },
+                    'created_at': post.created_at.replace(tzinfo=timezone.utc).astimezone(JST).isoformat()
+                }
+            })
 
-        # 1. 全ての投稿を取得 (ユーザー情報も結合)
-        all_posts_query = Post.query.options(joinedload(Post.user)).filter(Post.contest_id == id).all()
-        if not all_posts_query:
-             return jsonify({ 'contest': { 'id': contest.id, 'name': contest.name, 'theme': contest.theme }, 'results': [], 'totalPosters': 0, 'totalVoters': 0 })
-
-        # 2. 全ての投票情報を取得 (投票者情報も結合)
+        # ... (以下、既存の結果整形ロジック) ...
         all_votes_query = db.session.query(Vote, User).join(User, Vote.user_id == User.id).filter(Vote.contest_id == id).all()
         voters_by_post = {}
         for vote, user in all_votes_query:
             if vote.post_id not in voters_by_post: voters_by_post[vote.post_id] = []
+            # 投票者リスト表示: 審査員の場合は点数も表示したいのでcountを含める
             voters_by_post[vote.post_id].append({ 'screen_name': user.screen_name, 'count': vote.count, 'is_judge': vote.is_judge_vote })
-
-        # 3. 各投稿のスコアと順位を計算 (0票も含む)
-        contest_results = calculate_contest_results(id) or {}
-
-        # 4. ブックマーク情報を取得
-        post_ids = [p.id for p in all_posts_query]
-        bookmark_counts_query = db.session.query(Bookmark.post_id, func.count(Bookmark.id).label('bookmark_count')).filter(Bookmark.post_id.in_(post_ids)).group_by(Bookmark.post_id).all()
-        bookmark_counts = {post_id: count for post_id, count in bookmark_counts_query}
+        
+        post_ids = [p.id for p in all_posts]
+        bookmark_counts = dict(db.session.query(Bookmark.post_id, func.count(Bookmark.id)).filter(Bookmark.post_id.in_(post_ids)).group_by(Bookmark.post_id).all())
         user_bookmarks = set()
-        if user_id:
-            user_bookmarks_query = db.session.query(Bookmark.post_id).filter(Bookmark.user_id == user_id, Bookmark.post_id.in_(post_ids)).all()
-            user_bookmarks = {post_id for (post_id,) in user_bookmarks_query}
+        if user_id: user_bookmarks = {p for (p,) in db.session.query(Bookmark.post_id).filter(Bookmark.user_id == user_id, Bookmark.post_id.in_(post_ids)).all()}
 
-        # 5. 全投稿リストに情報を結合
         results_list = []
-        for post in all_posts_query:
-            post_result = contest_results.get(post.id, {'rank': None, 'score': 0}) # 結果がない(0票)場合
+        for post in all_posts:
+            post_result = contest_results.get(post.id, {'rank': None, 'score': 0})
             post_voters = voters_by_post.get(post.id, [])
             post_voters.sort(key=lambda v: v['is_judge'], reverse=True)
             results_list.append({
@@ -680,39 +708,23 @@ def get_contest_results(id):
                 'user': { 'screen_name': post.user.screen_name, 'profile_image_url': post.user.profile_image_url },
                 'voters': post_voters,
                 'bookmarkCount': bookmark_counts.get(post.id, 0),
-                'isBookmarked': post.id in user_bookmarks
+                'isBookmarked': post.id in user_bookmarks,
+                'awards': award_badges.get(post.id, []) # バッジ情報を追加
             })
         
-        # 6. 最終ソート (順位がNoneでないものを優先し、次にスコア順)
-        results_list.sort(key=lambda x: (x['rank'] is None, -x['score'], datetime.fromisoformat(x['created_at']).timestamp()))
-        # 順位を再割り当て
-        ranked_results_data = []
-        current_rank = 0
-        last_score = -1
-        rank_counter = 0
-        for result in results_list:
-            rank_counter += 1
-            if result['score'] != last_score:
-                current_rank = rank_counter
-                last_score = result['score']
-            result['rank'] = current_rank if result['score'] > 0 else None # 0票はランクなし
-            ranked_results_data.append(result)
-
-        # 7. 統計情報
+        results_list.sort(key=lambda x: (x['rank'] is None, x['rank']))
         total_posters = db.session.query(func.count(distinct(Post.user_id))).filter(Post.contest_id == id).scalar()
         total_voters = db.session.query(func.count(distinct(Vote.user_id))).filter(Vote.contest_id == id).scalar()
 
         return jsonify({
-            'contest': { 'id': contest.id, 'name': contest.name, 'theme': contest.theme },
-            'results': ranked_results_data,
-            'totalPosters': total_posters if total_posters is not None else 0,
-            'totalVoters': total_voters if total_voters is not None else 0
+            'contest': { 'id': c.id, 'name': c.name, 'theme': c.theme },
+            'results': results_list,
+            'judgeAwards': judge_awards_data, # 追加
+            'totalPosters': total_posters or 0,
+            'totalVoters': total_voters or 0
         })
-
     except Exception as e:
-        print(f"!!! ERROR at GET /api/contests/{id}/results: {e}")
-        traceback.print_exc()
-        return jsonify({"error": "結果の取得に失敗しました。"}), 500
+        print(e); traceback.print_exc(); return jsonify({"error": "Error"}), 500
     
 @app.route('/api/contests/<int:id>/judge/login', methods=['POST'])
 def judge_login(id):

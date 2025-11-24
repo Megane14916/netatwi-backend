@@ -57,6 +57,7 @@ class Post(db.Model):
     bookmarks = db.relationship('Bookmark', back_populates='post', lazy=True, cascade="all, delete-orphan")
 
 
+
 class Vote(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     count = db.Column(db.Integer, nullable=False, default=0)
@@ -72,6 +73,9 @@ class Vote(db.Model):
     contest = db.relationship('Contest', back_populates='votes', lazy=True)
 
     __table_args__ = (db.UniqueConstraint('user_id', 'post_id', name='uq_user_post_vote'),)
+
+    is_judge_award = db.Column(db.Boolean, nullable=False, default=False) # 審査員賞かどうか
+    judge_comment = db.Column(db.Text, nullable=True) # 審査員コメント
 # --- ▲▲▲ ここまで ▲▲▲ ---
 
 class Bookmark(db.Model):
