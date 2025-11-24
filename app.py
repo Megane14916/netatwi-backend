@@ -210,46 +210,65 @@ def twitter_callback():
 # ...
 
 def calculate_contest_results(contest_id):
-    """指定された大会IDの結果を集計して返すヘルパー関数"""
+    """
+    指定された大会IDの結果を集計して返す
+    計算式: 審査員得票数の合計 + (一般得票数 / 一般投票者数) * 50
+    """
     contest = Contest.query.get(contest_id)
     if not contest:
-        return None # 大会が存在しない
+        return None 
 
-    # is_judge_vote が True の場合は ratio を掛け、そうでなければそのまま count を使う
-    score_calculation = case(
-        (Vote.is_judge_vote == True, Vote.count * contest.judge_vote_ratio),
-        else_=Vote.count
-    )
+    # 1. 一般投票者数の総数（ユニークユーザー数）を取得
+    # ※ is_judge_vote=False の投票を行ったユニークユーザー数をカウント
+    total_general_voters = db.session.query(func.count(distinct(Vote.user_id)))\
+        .filter(Vote.contest_id == contest_id, Vote.is_judge_vote == False)\
+        .scalar()
+    
+    # 0除算防止
+    if total_general_voters is None or total_general_voters == 0:
+        total_general_voters = 1
+
+    # 2. 各投稿ごとの集計
+    # 審査員票の合計
+    judge_score_col = func.sum(case((Vote.is_judge_vote == True, Vote.count), else_=0))
+    # 一般票の合計 (いいね数)
+    general_votes_col = func.sum(case((Vote.is_judge_vote == False, Vote.count), else_=0))
 
     results_query = db.session.query(
         Vote.post_id,
-        func.sum(score_calculation).label('total_score')
+        judge_score_col.label('judge_score'),
+        general_votes_col.label('general_votes')
     ).filter(
         Vote.contest_id == contest_id
     ).group_by(
         Vote.post_id
     ).subquery()
 
+    # 3. スコア計算とランキング
+    # 計算式: judge_score + (general_votes / total_general_voters) * 50
+    # SQLレベルで計算
+    final_score_expr = results_query.c.judge_score + (results_query.c.general_votes / total_general_voters) * 50
+
     ranked_posts_query = db.session.query(
         Post,
-        results_query.c.total_score
+        final_score_expr.label('total_score')
     ).join(
         results_query, Post.id == results_query.c.post_id
     ).filter(
         Post.contest_id == contest_id
     ).order_by(
-        results_query.c.total_score.desc(),
+        final_score_expr.desc(),
         Post.created_at.asc()
     )
 
     ranked_results = []
-    # ランキングとスコアを計算
     current_rank = 0
     last_score = -1
     rank_counter = 0
+    
     for post, total_score in ranked_posts_query.all():
         rank_counter += 1
-        # 同点の場合は同じ順位にする
+        # 浮動小数点になる可能性があるため、適当な桁で比較するか、そのまま比較
         if total_score != last_score:
             current_rank = rank_counter
             last_score = total_score
@@ -257,10 +276,9 @@ def calculate_contest_results(contest_id):
         ranked_results.append({
             'post_id': post.id,
             'rank': current_rank,
-            'score': total_score if total_score is not None else 0 # スコアがない場合は0
+            'score': round(total_score, 2) # 小数点2桁まで
         })
 
-    # post_id をキーにした辞書に変換して返す
     return {result['post_id']: result for result in ranked_results}
 
 @app.route('/api/me')
@@ -555,80 +573,62 @@ def submit_post(id):
 
 @app.route('/api/contests/<int:id>/vote', methods=['POST'])
 def submit_votes(id):
-    if 'user_id' not in session:
-        return jsonify({"error": "ログインが必要です。"}), 401
+    if 'user_id' not in session: return jsonify({"error": "Login required"}), 401
     
     user_id = session['user_id']
-    votes_data = request.get_json() 
+    data = request.get_json()
+    votes_to_submit = data.get('votes') # { "postId": count, ... }
 
-    if not isinstance(votes_data, dict) or 'votes' not in votes_data or not isinstance(votes_data['votes'], dict):
-         return jsonify({"error": "無効なリクエスト形式です。"}), 400
-         
-    votes_to_submit = votes_data['votes']
+    if not isinstance(votes_to_submit, dict):
+         return jsonify({"error": "Invalid vote data"}), 400
 
     try:
-        # --- ▼▼▼ 審査員モードか判定 ▼▼▼ ---
         judge_contest_ids = session.get('judge_for_contest_ids', [])
         is_judge_voting_now = id in judge_contest_ids
-        print(f"--- Vote Submission: User {user_id} for Contest {id}. Is Judge? {is_judge_voting_now} ---") # ログ追加
-        # --- ▲▲▲ ここまで ▲▲▲ ---
-
-        # 既に投票済みかチェック (審査員票は一般票とは別に扱わない - 一度投票したら終わり)
-        existing_vote = Vote.query.filter_by(user_id=user_id, contest_id=id).first()
-        if existing_vote:
-            # ここで「審査員としてなら再投票可能」とするかは要件次第ですが、今回は不可とします
-            return jsonify({"error": "この大会には既に投票済みです（一般票または審査員票）。"}), 409
-
-        contest = Contest.query.get_or_404(id)
-        now = datetime.now(timezone.utc) 
-
-        contest_end_time_aware = contest.end_time.replace(tzinfo=timezone.utc)
-        voting_end_time_aware = contest.voting_end_time.replace(tzinfo=timezone.utc)
-
-        if not (contest_end_time_aware <= now < voting_end_time_aware):
-             return jsonify({"error": "現在は投票期間外です。"}), 403
-
-        total_votes = sum(votes_to_submit.values())
         
-        # 審査員は10票制限を無視するか？ -> 今回は無視しない（一般票と同じルール）
-        if total_votes < 10 and not is_judge_voting_now: # 一般票の場合のみチェック
-            return jsonify({"error": f"合計10票以上の投票が必要です。現在の合計: {total_votes}票"}), 400
+        # 一般投票は1回のみ（再投票不可）。審査員は何度でも修正可能とするか？ -> 今回は一般のみ制限
+        if not is_judge_voting_now:
+            if Vote.query.filter_by(user_id=user_id, contest_id=id).first():
+                 return jsonify({"error": "Already voted"}), 409
+        else:
+            # 審査員の場合、既存の投票を一旦削除して上書きする（修正可能にするため）
+             Vote.query.filter_by(user_id=user_id, contest_id=id).delete()
 
-        # 投票データをDBに保存
-        for post_id_str, count in votes_to_submit.items():
+        # 期間チェック
+        c = Contest.query.get_or_404(id)
+        now = datetime.now(timezone.utc)
+        if not (c.end_time.replace(tzinfo=timezone.utc) <= now < c.voting_end_time.replace(tzinfo=timezone.utc)):
+             return jsonify({"error": "Outside period"}), 403
+
+        # 投票内容のバリデーションと保存
+        for pid_str, count in votes_to_submit.items():
             try:
-                post_id = int(post_id_str)
-                if not (0 <= count <= 3):
-                    raise ValueError("投票数は0から3の間でなければなりません。")
+                post_id = int(pid_str)
                 
-                post = Post.query.filter_by(id=post_id, contest_id=id).first()
-                if not post:
-                    raise ValueError(f"投稿ID {post_id} が無効です。")
-
-                if count > 0: 
-                    vote = Vote(
-                        user_id=user_id, 
-                        post_id=post_id, 
-                        contest_id=id, 
+                # 一般: 0 or 1, 審査員: 0~10
+                if is_judge_voting_now:
+                    if not (0 <= count <= 10): raise ValueError("Judge vote must be 0-10")
+                else:
+                    if count not in (0, 1): raise ValueError("General vote must be 0 or 1")
+                
+                # 0の場合はDBに保存しない（投票なし）
+                if count > 0:
+                    db.session.add(Vote(
+                        user_id=user_id,
+                        post_id=post_id,
+                        contest_id=id,
                         count=count,
-                        # --- ▼▼▼ is_judge_vote を設定 ▼▼▼ ---
-                        is_judge_vote=is_judge_voting_now 
-                        # --- ▲▲▲ ここまで ▲▲▲ ---
-                    )
-                    db.session.add(vote)
-
-            except (ValueError, TypeError) as ve:
-                 db.session.rollback()
-                 return jsonify({"error": f"投票データの処理中にエラーが発生しました: {ve}"}), 400
+                        is_judge_vote=is_judge_voting_now
+                    ))
+            except (ValueError, TypeError):
+                 continue # 不正な値はスキップ
 
         db.session.commit()
-        return jsonify({"message": "投票を受け付けました。"}), 200
-
+        return jsonify({"message": "Voted"}), 200
     except Exception as e:
         db.session.rollback()
-        print(f"!!! ERROR at POST /api/contests/{id}/vote: {e}")
-        traceback.print_exc()
-        return jsonify({"error": "投票処理中に予期せぬエラーが発生しました。"}), 500
+        print(f"Error: {e}")
+        return jsonify({"error": "Error"}), 500
     
 @app.route('/api/contests/<int:id>/results')
 def get_contest_results(id):
