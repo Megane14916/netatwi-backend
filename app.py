@@ -428,6 +428,7 @@ def get_contests():
             # 投稿者数・投票者数の計算
             total_posters = db.session.query(func.count(distinct(Post.user_id))).filter(Post.contest_id == contest.id).scalar() or 0
             total_voters = db.session.query(func.count(distinct(Vote.user_id))).filter(Vote.contest_id == contest.id).scalar() or 0
+            total_judges = db.session.query(func.count(distinct(Vote.user_id))).filter(Vote.contest_id == contest.id, Vote.is_judge_vote == True).scalar() or 0
             
             c_data = { 
                 'id': contest.id, 'name': contest.name, 'hasTheme': contest.has_theme, 'theme': contest.theme, 'hasQualifier': contest.has_qualifier, 
@@ -438,7 +439,8 @@ def get_contests():
                 'generalVoteWeight': contest.general_vote_weight, 'judgeMaxScore': contest.judge_max_score,
                 # 追加フィールド
                 'totalPosters': total_posters,
-                'totalVoters': total_voters
+                'totalVoters': total_voters,
+                'totalJudges': total_judges
             }
             
             if st and et and st <= now < et: ongoing.append(c_data)
@@ -451,13 +453,13 @@ def get_contests():
             latest = closed_data[0]
             latest_result = {
                 'contest_id': latest['id'], 'contest_name': latest['name'], 'theme': latest['theme'],
-                'totalPosters': latest['totalPosters'], 'totalVoters': latest['totalVoters']
+                'totalPosters': latest['totalPosters'], 'totalVoters': latest['totalVoters'], 'totalJudges': latest['totalJudges']
             }
             
         upcoming.reverse()
         return jsonify({'ongoing': ongoing, 'voting': voting, 'upcoming': upcoming, 'closed': closed_data, 'latestResult': latest_result})
     except Exception as e: return jsonify({"error": "Failed"}), 500
-    
+
 @app.route('/api/contests/<int:id>')
 def get_contest_details(id):
     try:
@@ -509,6 +511,7 @@ def get_posts_for_contest(id):
                 }
             # --- ▲▲▲ ここまで ▲▲▲ ---
 
+        total_posters = db.session.query(func.count(distinct(Post.user_id))).filter(Post.contest_id == id).scalar() or 0
 
         posts_data = []
         for post in posts:
@@ -527,7 +530,8 @@ def get_posts_for_contest(id):
         # --- ▼▼▼ レスポンスにフラグを追加 ▼▼▼ ---
         return jsonify({
             'posts': posts_data,
-            'userHasVotedInContest': user_has_voted 
+            'userHasVotedInContest': user_has_voted,
+            'totalPosters': total_posters 
         })
         # --- ▲▲▲ ここまで ▲▲▲ ---
     except Exception as e:
@@ -734,13 +738,15 @@ def get_contest_results(id):
         results_list.sort(key=lambda x: (x['rank'] is None, x['rank']))
         total_posters = db.session.query(func.count(distinct(Post.user_id))).filter(Post.contest_id == id).scalar()
         total_voters = db.session.query(func.count(distinct(Vote.user_id))).filter(Vote.contest_id == id).scalar()
+        total_judges = db.session.query(func.count(distinct(Vote.user_id))).filter(Vote.contest_id == id, Vote.is_judge_vote == True).scalar()
 
         return jsonify({
             'contest': { 'id': c.id, 'name': c.name, 'theme': c.theme },
             'results': results_list,
             'judgeAwards': judge_awards_data, # 追加
             'totalPosters': total_posters or 0,
-            'totalVoters': total_voters or 0
+            'totalVoters': total_voters or 0,
+            'totalJudges': total_judges or 0
         })
     except Exception as e:
         print(e); traceback.print_exc(); return jsonify({"error": "Error"}), 500
