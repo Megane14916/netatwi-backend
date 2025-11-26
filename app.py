@@ -48,6 +48,9 @@ app = Flask(__name__)
 
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=0, x_prefix=0)
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # --- アプリケーション設定 ---
 app.config.update(
     SECRET_KEY=os.environ.get('SECRET_KEY', 'a-very-secret-key-that-is-secure'),
@@ -139,8 +142,7 @@ AUTHORIZE_URL = "https://api.twitter.com/oauth/authorize"
 ACCESS_TOKEN_URL = "https://api.twitter.com/oauth/access_token"
 USER_INFO_URL = "https://api.twitter.com/1.1/account/verify_credentials.json"
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+
 
 @app.before_request
 def log_request_info():
