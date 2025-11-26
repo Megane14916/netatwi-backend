@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from flask_sqlalchemy import SQLAlchemy
+import json
 
 db = SQLAlchemy()
 
@@ -27,7 +28,9 @@ class Contest(db.Model):
     end_time = db.Column(db.DateTime, nullable=False) # 通常:投稿終了 / 予選あり: 決勝投稿終了
     voting_end_time = db.Column(db.DateTime, nullable=False) # 通常:投票終了 / 予選あり: 決勝投票終了
     
-    judge_vote_ratio = db.Column(db.Integer, nullable=False, default=2)
+    general_vote_weight = db.Column(db.Integer, nullable=False, default=50) # 一般票の重み係数 (デフォルト50)
+    judge_max_score = db.Column(db.Integer, nullable=False, default=10)
+
     judge_password = db.Column(db.String(120), nullable=True)
     has_theme = db.Column(db.Boolean, nullable=False, default=True)
     has_qualifier = db.Column(db.Boolean, nullable=False, default=False)
@@ -45,7 +48,9 @@ class Contest(db.Model):
 class Post(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     content = db.Column(db.Text, nullable=False)
-    image_url = db.Column(db.String(255), nullable=True)
+
+    image_urls = db.Column(db.Text, nullable=True) 
+
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     contest_id = db.Column(db.Integer, db.ForeignKey('contest.id'), nullable=False)
@@ -56,11 +61,26 @@ class Post(db.Model):
     votes = db.relationship('Vote', back_populates='post', lazy=True)
     bookmarks = db.relationship('Bookmark', back_populates='post', lazy=True, cascade="all, delete-orphan")
 
+    @property
+    def images(self):
+        if self.image_urls:
+            try:
+                return json.loads(self.image_urls)
+            except:
+                return []
+        return []
+
+    @images.setter
+    def images(self, value):
+        if value:
+            self.image_urls = json.dumps(value)
+        else:
+            self.image_urls = None
 
 
 class Vote(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    count = db.Column(db.Integer, nullable=False, default=0)
+    count = db.Column(db.Float, nullable=False, default=0.0)
     is_judge_vote = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

@@ -1,6 +1,9 @@
 import os
 import traceback
 import logging
+import uuid
+import boto3 # R2用
+from werkzeug.utils import secure_filename
 from flask import Flask, jsonify, session, request, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -65,7 +68,8 @@ app.config.update(
     # ※ 注意: http://localhost で動かす場合、ブラウザがCookieを送信しなくなるため
     #   ログインセッションが維持できなくなる可能性があります。
     #   ローカル開発で動作させる場合は False に戻すか、localhostをhttps化してください。
-    SESSION_COOKIE_SECURE=True
+    SESSION_COOKIE_SECURE=True,
+    MAX_CONTENT_LENGTH=16 * 1024 * 1024 
 )
 
 JST = timezone(timedelta(hours=9), 'JST')
@@ -76,6 +80,56 @@ CORS(app, supports_credentials=True, origins=[frontend_url])
 # ---
 db.init_app(app)
 migrate = Migrate(app, db)
+
+UPLOAD_FOLDER = 'static/uploads'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# R2設定
+USE_R2 = os.environ.get('USE_R2', 'False').lower() == 'true'
+R2_BUCKET_NAME = os.environ.get('R2_BUCKET_NAME')
+R2_PUBLIC_URL = os.environ.get('R2_PUBLIC_URL', '').rstrip('/')
+
+def get_r2_client():
+    return boto3.client(
+        's3',
+        endpoint_url=os.environ.get('R2_ENDPOINT_URL'),
+        aws_access_key_id=os.environ.get('R2_ACCESS_KEY_ID'),
+        aws_secret_access_key=os.environ.get('R2_SECRET_ACCESS_KEY'),
+        region_name='auto'
+    )
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def save_file(file):
+    """ファイルを保存し、パブリックURLを返す"""
+    filename = secure_filename(file.filename)
+    # ユニークなファイル名にする
+    ext = filename.rsplit('.', 1)[1].lower()
+    unique_filename = f"{uuid.uuid4().hex}.{ext}"
+
+    if USE_R2:
+        try:
+            s3 = get_r2_client()
+            s3.upload_fileobj(
+                file, 
+                R2_BUCKET_NAME, 
+                unique_filename,
+                ExtraArgs={'ContentType': file.content_type}
+            )
+            return f"{R2_PUBLIC_URL}/{unique_filename}"
+        except Exception as e:
+            logger.error(f"R2 Upload Error: {e}")
+            raise e
+    else:
+        # ローカル保存
+        file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
+        file.save(file_path)
+        # FlaskのstaticファイルとしてのURLを返す (本番ではFRONTEND_URL経由でアクセスできる前提)
+        # ここではバックエンドのURLを返す必要がある (CORS等注意)
+        # 開発環境では http://localhost:5001/static/uploads/... となる
+        return f"/static/uploads/{unique_filename}"
 
 # --- X OAuth Login ---
 X_CONSUMER_KEY = os.environ.get("X_CONSUMER_KEY")
@@ -211,48 +265,39 @@ def twitter_callback():
 
 def calculate_contest_results(contest_id):
     """
-    指定された大会IDの結果を集計して返す
-    計算式: 審査員得票数の合計 + (一般得票数 / 一般投票者数) * 50
+    計算式: 審査員得票数の合計 + (一般得票数 / 一般投票者数) * general_vote_weight
     """
     contest = Contest.query.get(contest_id)
-    if not contest:
-        return None 
+    if not contest: return None 
 
-    # 1. 一般投票者数の総数（ユニークユーザー数）を取得
-    # ※ is_judge_vote=False の投票を行ったユニークユーザー数をカウント
+    # 一般投票者の総数（ユニーク）を取得
     total_general_voters = db.session.query(func.count(distinct(Vote.user_id)))\
-        .filter(Vote.contest_id == contest_id, Vote.is_judge_vote == False)\
-        .scalar()
+        .filter(Vote.contest_id == contest_id, Vote.is_judge_vote == False).scalar()
     
-    # 0除算防止
     if total_general_voters is None or total_general_voters == 0:
         total_general_voters = 1
 
-    # 2. 各投稿ごとの集計
-    # 審査員票の合計
+    # 審査員票はそのまま合計 (重みなし)
     judge_score_col = func.sum(case((Vote.is_judge_vote == True, Vote.count), else_=0))
-    # 一般票の合計 (いいね数)
+    # 一般票はいいね数合計
     general_votes_col = func.sum(case((Vote.is_judge_vote == False, Vote.count), else_=0))
 
     results_query = db.session.query(
-        Vote.post_id,
-        judge_score_col.label('judge_score'),
+        Vote.post_id, 
+        judge_score_col.label('judge_score'), 
         general_votes_col.label('general_votes')
-    ).filter(
-        Vote.contest_id == contest_id
-    ).group_by(
-        Vote.post_id
-    ).subquery()
+    ).filter(Vote.contest_id == contest_id).group_by(Vote.post_id).subquery()
 
-    # 3. スコア計算とランキング
-    # 計算式: judge_score + (general_votes / total_general_voters) * 50
-    # SQLレベルで計算
-    final_score_expr = results_query.c.judge_score + (results_query.c.general_votes / total_general_voters) * 50
+    judge_score_val = func.coalesce(results_query.c.judge_score, 0)
+    general_votes_val = func.coalesce(results_query.c.general_votes, 0)
+    
+    # 新しい計算式
+    final_score_expr = judge_score_val + (general_votes_val / total_general_voters) * contest.general_vote_weight
 
     ranked_posts_query = db.session.query(
-        Post,
+        Post, 
         final_score_expr.label('total_score')
-    ).join(
+    ).outerjoin(
         results_query, Post.id == results_query.c.post_id
     ).filter(
         Post.contest_id == contest_id
@@ -262,23 +307,16 @@ def calculate_contest_results(contest_id):
     )
 
     ranked_results = []
-    current_rank = 0
-    last_score = -1
-    rank_counter = 0
+    current_rank = 0; last_score = -1; rank_counter = 0
     
     for post, total_score in ranked_posts_query.all():
         rank_counter += 1
-        # 浮動小数点になる可能性があるため、適当な桁で比較するか、そのまま比較
-        if total_score != last_score:
+        current_score_val = round(total_score, 2) if total_score is not None else 0
+        if current_score_val != last_score: 
             current_rank = rank_counter
-            last_score = total_score
+            last_score = current_score_val
+        ranked_results.append({'post_id': post.id, 'rank': current_rank, 'score': current_score_val})
         
-        ranked_results.append({
-            'post_id': post.id,
-            'rank': current_rank,
-            'score': round(total_score, 2) # 小数点2桁まで
-        })
-
     return {result['post_id']: result for result in ranked_results}
 
 @app.route('/api/me')
@@ -301,17 +339,7 @@ def get_current_user():
 @app.route('/api/logout')
 def logout():
     session.clear()
-    response = jsonify({'message': 'Logged out successfully'})
-    
-    # 【修正】念のため明示的にCookie削除ヘッダーを付与
-    # session.clear() でも行われますが、属性（SameSite等）を一致させて確実に削除します
-    session_cookie_name = app.config.get('SESSION_COOKIE_NAME', 'session')
-    response.delete_cookie(
-        session_cookie_name,
-        secure=app.config.get('SESSION_COOKIE_SECURE'),
-        samesite=app.config.get('SESSION_COOKIE_SAMESITE')
-    )
-    return response
+    return jsonify({'message': 'Logged out successfully'})
 
 @app.route('/api/admin/contests', methods=['POST'])
 def create_contest():
@@ -362,7 +390,8 @@ def create_contest():
             qualifier_end_time=qualifier_end_time_utc,
             qualifier_voting_end_time=qualifier_voting_end_time_utc,
             # --- ▲▲▲ ここまで ▲▲▲ ---
-            judge_vote_ratio=int(data['judgeVoteRatio']),
+            general_vote_weight=int(data.get('generalVoteWeight', 50)),
+            judge_max_score=int(data.get('judgeMaxScore', 10)),
             judge_password=data.get('judgePassword')
         )
         db.session.add(new_contest)
@@ -387,79 +416,46 @@ def get_contests():
     try:
         contests = Contest.query.order_by(Contest.start_time.desc()).all()
         now = datetime.now(timezone.utc)
-
-        ongoing_contests_data = []
-        voting_contests_data = []
-        upcoming_contests_data = []
-        closed_contests_list = []
-        closed_contests_data = []
-        latest_result_data = None
-
+        ongoing, voting, upcoming, closed_list, closed_data = [], [], [], [], []
+        latest_result = None
         for contest in contests:
-            # --- ▼▼▼ 時刻の aware 化を最初に行う ▼▼▼ ---
-            start_time_aware = contest.start_time.replace(tzinfo=timezone.utc) if contest.start_time else None
-            end_time_aware = contest.end_time.replace(tzinfo=timezone.utc) if contest.end_time else None
-            voting_end_time_aware = contest.voting_end_time.replace(tzinfo=timezone.utc) if contest.voting_end_time else None
-            qualifier_start_time_aware = contest.qualifier_start_time.replace(tzinfo=timezone.utc) if contest.qualifier_start_time else None
-            qualifier_end_time_aware = contest.qualifier_end_time.replace(tzinfo=timezone.utc) if contest.qualifier_end_time else None
-            qualifier_voting_end_time_aware = contest.qualifier_voting_end_time.replace(tzinfo=timezone.utc) if contest.qualifier_voting_end_time else None
-            # --- ▲▲▲ ここまで ▲▲▲ ---
-
-            contest_data_for_frontend = {
-                'id': contest.id, 'name': contest.name,
-                # --- ▼▼▼ has_theme と theme を追加 ▼▼▼ ---
-                'hasTheme': contest.has_theme,
-                'theme': contest.theme if contest.has_theme else None,
-                # --- ▲▲▲ ここまで ▲▲▲ ---
-                # --- ▼▼▼ has_qualifier と予選時刻を追加 ▼▼▼ ---
-                'hasQualifier': contest.has_qualifier,
-                'startTime': start_time_aware.astimezone(JST).isoformat() if start_time_aware else None,
-                'endTime': end_time_aware.astimezone(JST).isoformat() if end_time_aware else None,
-                'votingEndTime': voting_end_time_aware.astimezone(JST).isoformat() if voting_end_time_aware else None,
-                'qualifierStartTime': qualifier_start_time_aware.astimezone(JST).isoformat() if qualifier_start_time_aware else None,
-                'qualifierEndTime': qualifier_end_time_aware.astimezone(JST).isoformat() if qualifier_end_time_aware else None,
-                'qualifierVotingEndTime': qualifier_voting_end_time_aware.astimezone(JST).isoformat() if qualifier_voting_end_time_aware else None,
-                # --- ▲▲▲ ここまで ▲▲▲ ---
-                'judgeVoteRatio': contest.judge_vote_ratio
+            st = contest.start_time.replace(tzinfo=timezone.utc) if contest.start_time else None
+            et = contest.end_time.replace(tzinfo=timezone.utc) if contest.end_time else None
+            vt = contest.voting_end_time.replace(tzinfo=timezone.utc) if contest.voting_end_time else None
+            
+            # 投稿者数・投票者数の計算
+            total_posters = db.session.query(func.count(distinct(Post.user_id))).filter(Post.contest_id == contest.id).scalar() or 0
+            total_voters = db.session.query(func.count(distinct(Vote.user_id))).filter(Vote.contest_id == contest.id).scalar() or 0
+            
+            c_data = { 
+                'id': contest.id, 'name': contest.name, 'hasTheme': contest.has_theme, 'theme': contest.theme, 'hasQualifier': contest.has_qualifier, 
+                'startTime': st.astimezone(JST).isoformat() if st else None, 'endTime': et.astimezone(JST).isoformat() if et else None, 'votingEndTime': vt.astimezone(JST).isoformat() if vt else None, 
+                'qualifierStartTime': contest.qualifier_start_time.replace(tzinfo=timezone.utc).astimezone(JST).isoformat() if contest.qualifier_start_time else None, 
+                'qualifierEndTime': contest.qualifier_end_time.replace(tzinfo=timezone.utc).astimezone(JST).isoformat() if contest.qualifier_end_time else None, 
+                'qualifierVotingEndTime': contest.qualifier_voting_end_time.replace(tzinfo=timezone.utc).astimezone(JST).isoformat() if contest.qualifier_voting_end_time else None, 
+                'generalVoteWeight': contest.general_vote_weight, 'judgeMaxScore': contest.judge_max_score,
+                # 追加フィールド
+                'totalPosters': total_posters,
+                'totalVoters': total_voters
             }
-
-            # 分類ロジック (予選がある場合も考慮が必要だが、今回は簡略化のため通常時間で分類)
-            # 本格実装では、予選時間も見てステータスを細分化する必要がある
-            if start_time_aware and end_time_aware and start_time_aware <= now < end_time_aware:
-                ongoing_contests_data.append(contest_data_for_frontend)
-            elif end_time_aware and voting_end_time_aware and end_time_aware <= now < voting_end_time_aware:
-                voting_contests_data.append(contest_data_for_frontend)
-            elif start_time_aware and now < start_time_aware:
-                upcoming_contests_data.append(contest_data_for_frontend)
-            elif voting_end_time_aware and now >= voting_end_time_aware : # 終了済み
-                closed_contests_list.append(contest)
-                closed_contests_data.append(contest_data_for_frontend)
-
-        # 最新の結果を取得するロジック
-        if closed_contests_list:
-            latest_closed_contest = closed_contests_list[0]
-            # --- ▼▼▼ 最新結果の構造をシンプル化 ▼▼▼ ---
-            latest_result_data = {
-                'contest_id': latest_closed_contest.id,
-                'contest_name': latest_closed_contest.name,
-                'theme': latest_closed_contest.theme if latest_closed_contest.has_theme else None,
+            
+            if st and et and st <= now < et: ongoing.append(c_data)
+            elif et and vt and et <= now < vt: voting.append(c_data)
+            elif st and now < st: upcoming.append(c_data)
+            elif vt and now >= vt: closed_list.append(contest); closed_data.append(c_data)
+            
+        if closed_data: 
+            # closed_dataはすでにソートされている(contestsループ順)ので、先頭が最新
+            latest = closed_data[0]
+            latest_result = {
+                'contest_id': latest['id'], 'contest_name': latest['name'], 'theme': latest['theme'],
+                'totalPosters': latest['totalPosters'], 'totalVoters': latest['totalVoters']
             }
-            # --- ▲▲▲ ここまで ▲▲▲ ---
-
-        upcoming_contests_data.reverse()
-
-        return jsonify({
-            'ongoing': ongoing_contests_data,
-            'voting': voting_contests_data,
-            'upcoming': upcoming_contests_data,
-            'closed': closed_contests_data,
-            'latestResult': latest_result_data
-        })
-    except Exception as e:
-        print(f"!!! ERROR at /api/contests: {e}")
-        traceback.print_exc()
-        return jsonify({"error": "Failed to fetch contests"}), 500
-
+            
+        upcoming.reverse()
+        return jsonify({'ongoing': ongoing, 'voting': voting, 'upcoming': upcoming, 'closed': closed_data, 'latestResult': latest_result})
+    except Exception as e: return jsonify({"error": "Failed"}), 500
+    
 @app.route('/api/contests/<int:id>')
 def get_contest_details(id):
     try:
@@ -473,7 +469,8 @@ def get_contest_details(id):
             'endTime': contest.end_time.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
             'votingEndTime': contest.voting_end_time.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
             # --- ▼▼▼ 設定値を追加 ▼▼▼ ---
-            'judgeVoteRatio': contest.judge_vote_ratio,
+            'generalVoteWeight': contest.general_vote_weight,
+            'judgeMaxScore': contest.judge_max_score,
             'hasTheme': contest.has_theme,
             'hasQualifier': contest.has_qualifier,
             'allowImages': contest.allow_images,
@@ -494,6 +491,7 @@ def get_posts_for_contest(id):
         # --- ▼▼▼ 既に投票済みかチェックするフラグを追加 ▼▼▼ ---
         user_has_voted = False 
         # --- ▲▲▲ ここまで ▲▲▲ ---
+        user_votes_map = {} 
 
         if user_id:
             votes = Vote.query.filter_by(user_id=user_id, contest_id=id).all()
@@ -501,17 +499,27 @@ def get_posts_for_contest(id):
             # --- ▼▼▼ 投票記録があればフラグをTrueに ▼▼▼ ---
             if votes: # 1件でも投票記録があれば投票済みとみなす
                 user_has_voted = True
+            for v in votes:
+                user_votes_map[v.post_id] = {
+                    'count': v.count,
+                    'is_judge_award': v.is_judge_award,
+                    'judge_comment': v.judge_comment
+                }
             # --- ▲▲▲ ここまで ▲▲▲ ---
 
 
         posts_data = []
         for post in posts:
+            my_vote = user_votes_map.get(post.id, {})
             posts_data.append({
                 'id': post.id,
                 'content': post.content,
                 'created_at': post.created_at.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
                 'user_id': post.user_id,
-                'myVotes': user_votes.get(post.id, 0) 
+                'myVotes': user_votes.get(post.id, 0) ,
+                'images': post.images, # 画像URLリストを追加
+                'myJudgeAward': my_vote.get('is_judge_award', False),   # 追加
+                'myJudgeComment': my_vote.get('judge_comment', None)
             })
         
         # --- ▼▼▼ レスポンスにフラグを追加 ▼▼▼ ---
@@ -528,48 +536,57 @@ def get_posts_for_contest(id):
 
 @app.route('/api/contests/<int:id>/posts', methods=['POST'])
 def submit_post(id):
-    if 'user_id' not in session:
-        return jsonify({"error": "ログインが必要です。"}), 401
-
+    if 'user_id' not in session: return jsonify({"error": "Login required"}), 401
     user_id = session['user_id']
-    data = request.get_json()
-    content = data.get('content')
 
-    if not content:
-        return jsonify({"error": "投稿内容がありません。"}), 400
+    # FormDataで来るため request.form と request.files を使う
+    content = request.form.get('content', '')
+    files = request.files.getlist('images') # 複数ファイル
+
+    # バリデーション: テキストも画像もなければエラー
+    if not content and not files:
+        return jsonify({"error": "Content or images required"}), 400
+    
+    # 画像枚数制限
+    if len(files) > 4:
+        return jsonify({"error": "Max 4 images allowed"}), 400
 
     try:
-        contest = Contest.query.get_or_404(id)
-        now = datetime.now(timezone.utc)
+        c = Contest.query.get_or_404(id); now = datetime.now(timezone.utc)
+        if not (c.start_time.replace(tzinfo=timezone.utc) <= now < c.end_time.replace(tzinfo=timezone.utc)): 
+            return jsonify({"error": "Outside period"}), 403
         
-        # DB時刻をUTC awareに変換して比較
-        start_time_aware = contest.start_time.replace(tzinfo=timezone.utc)
-        end_time_aware = contest.end_time.replace(tzinfo=timezone.utc)
+        if Post.query.filter_by(user_id=user_id, contest_id=id).first():
+             return jsonify({"error": "Already posted"}), 409
 
-        if not (start_time_aware <= now < end_time_aware):
-            return jsonify({"error": "現在は投稿受付期間外です。"}), 403
+        # 画像アップロード処理
+        image_urls = []
+        for file in files:
+            if file and allowed_file(file.filename):
+                url = save_file(file)
+                image_urls.append(url)
         
-        existing_post = Post.query.filter_by(user_id=user_id, contest_id=id).first()
-        if existing_post:
-            return jsonify({"error": "この大会には既に投稿済みです。"}), 409
-
+        # Post作成 (images setter経由で保存)
         new_post = Post(content=content, contest_id=id, user_id=user_id)
+        new_post.images = image_urls # JSON化して保存される
+
         db.session.add(new_post)
         db.session.commit()
-
+        
+        # レスポンス用データ
         return jsonify({
-            'id': new_post.id,
-            'content': new_post.content,
-            # DB保存後にtzinfoが失われるため、再度UTCを指定してからJSTに変換する
+            'id': new_post.id, 
+            'content': new_post.content, 
+            'images': new_post.images,
             'created_at': new_post.created_at.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
             'user_id': new_post.user_id
         }), 201
 
-    except Exception as e:
+    except Exception as e: 
         db.session.rollback()
-        print(f"!!! ERROR at POST /api/contests/{id}/posts: {e}")
-        traceback.print_exc()
-        return jsonify({"error": "投稿処理中にエラーが発生しました。"}), 500
+        print(f"Error: {e}")
+        return jsonify({"error": "Error"}), 500
+# --- ▲▲▲ ここまで ▲▲▲ ---
 
 @app.route('/api/contests/<int:id>/vote', methods=['POST'])
 def submit_votes(id):
@@ -584,31 +601,29 @@ def submit_votes(id):
          return jsonify({"error": "Invalid vote data"}), 400
 
     try:
+        is_judge = id in session.get('judge_for_contest_ids', [])
         judge_contest_ids = session.get('judge_for_contest_ids', [])
         is_judge_voting_now = id in judge_contest_ids
         
-        # 一般投票は1回のみ
-        if not is_judge_voting_now:
-            if Vote.query.filter_by(user_id=user_id, contest_id=id).first():
-                 return jsonify({"error": "Already voted"}), 409
-        else:
-            # 審査員の場合、既存の投票(賞含む)を全て削除して再登録
-             Vote.query.filter_by(user_id=user_id, contest_id=id).delete()
+        Vote.query.filter_by(user_id=user_id, contest_id=id).delete()
 
         # 期間チェック
         c = Contest.query.get_or_404(id)
         now = datetime.now(timezone.utc)
         if not (c.end_time.replace(tzinfo=timezone.utc) <= now < c.voting_end_time.replace(tzinfo=timezone.utc)):
              return jsonify({"error": "Outside period"}), 403
+        
+        max_score = c.judge_max_score if is_judge else 1
 
         # --- 投票データの保存 ---
         # 1. 点数投票の保存
         processed_post_ids = set()
-        for pid_str, count in votes_to_submit.items():
+        for pid_str, count_val in votes_to_submit.items():
             try:
                 post_id = int(pid_str)
+                count = float(count_val)
                 if is_judge_voting_now:
-                    if not (0 <= count <= 10): raise ValueError
+                    if not (0 <= count <= max_score): raise ValueError
                 else:
                     if count not in (0, 1): raise ValueError
                 
@@ -676,6 +691,7 @@ def get_contest_results(id):
                 'post': {
                     'post_id': post.id,
                     'content': post.content,
+                    'images': post.images,
                     'user': { 'screen_name': post.user.screen_name, 'profile_image_url': post.user.profile_image_url },
                     'created_at': post.created_at.replace(tzinfo=timezone.utc).astimezone(JST).isoformat()
                 }
@@ -703,6 +719,7 @@ def get_contest_results(id):
                 'rank': post_result['rank'],
                 'post_id': post.id,
                 'content': post.content,
+                'images': post.images,
                 'created_at': post.created_at.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
                 'score': post_result['score'],
                 'user': { 'screen_name': post.user.screen_name, 'profile_image_url': post.user.profile_image_url },
@@ -765,149 +782,176 @@ def judge_login(id):
         return jsonify({"error": "審査員認証中にエラーが発生しました。"}), 500
     
 @app.route('/api/profile/<string:screen_name>')
-def get_user_profile(screen_name):
+def get_user_profile_updated(screen_name):
     try:
-        # 1. 閲覧者の特定 (ログインしていれば)
         viewer_id = session.get('user_id')
-
-        # 2. プロフィール対象ユーザーの特定
         target_user = User.query.filter_by(screen_name=screen_name).first()
-        if not target_user:
-            return jsonify({"error": "ユーザーが見つかりません。"}), 404
-        
+        if not target_user: return jsonify({"error": "Not found"}), 404
         user_id = target_user.id
-        
-        # 3. 共通の現在時刻
         now = datetime.now(timezone.utc)
-        results_cache = {} # 計算結果のキャッシュ
+        results_cache = {}
 
-        # --- ヘルパー: 投稿データ整形関数 ---
+        # --- 共通整形関数 ---
         def format_posts(posts_query_result):
-            formatted_data = []
-            
-            # 表示対象となる投稿IDを収集（一括クエリ用）
+            target_posts = []
             target_post_ids = []
-            temp_posts = []
-
+            
+            # 1. 期間判定とID収集
             for post in posts_query_result:
-                contest = post.contest
-                voting_end_time_aware = contest.voting_end_time.replace(tzinfo=timezone.utc)
-                
-                # 結果が出ていない大会の投稿は除外
-                if now < voting_end_time_aware:
+                # 投票終了していない大会の投稿は表示しない（ネタバレ防止）
+                if now < post.contest.voting_end_time.replace(tzinfo=timezone.utc):
                     continue
-                
+                target_posts.append(post)
                 target_post_ids.append(post.id)
-                temp_posts.append(post)
-
-            if not target_post_ids:
+            
+            if not target_posts:
                 return []
 
-            # ブックマーク数の一括取得
-            bookmark_counts_query = db.session.query(Bookmark.post_id, func.count(Bookmark.id)).filter(Bookmark.post_id.in_(target_post_ids)).group_by(Bookmark.post_id).all()
-            bookmark_counts_map = {pid: count for pid, count in bookmark_counts_query}
+            # 2. 一括データ取得
+            # (a) 投票データ (投票者リスト構築用)
+            votes_data = db.session.query(Vote, User).join(User, Vote.user_id == User.id).filter(Vote.post_id.in_(target_post_ids)).all()
+            voters_map = {} # post_id -> [voter_dict, ...]
+            my_votes_map = {} # post_id -> count (閲覧者が投票した数)
 
-            # 閲覧者のブックマーク状況の一括取得
-            viewer_bookmarks_set = set()
+            for vote, v_user in votes_data:
+                if vote.post_id not in voters_map: voters_map[vote.post_id] = []
+                # 審査員の場合は点数も表示したいのでcountを含める
+                voters_map[vote.post_id].append({
+                    'screen_name': v_user.screen_name,
+                    'count': vote.count,
+                    'is_judge': vote.is_judge_vote
+                })
+                # 閲覧者の投票状況を確認
+                if viewer_id and vote.user_id == viewer_id:
+                    my_votes_map[vote.post_id] = vote.count
+
+            # (b) 審査員賞データ (バッジ用)
+            awards_data = db.session.query(Vote, User).join(User, Vote.user_id == User.id).filter(Vote.post_id.in_(target_post_ids), Vote.is_judge_award == True).all()
+            awards_map = {} # post_id -> ["xxx賞", ...]
+            for vote, j_user in awards_data:
+                if vote.post_id not in awards_map: awards_map[vote.post_id] = []
+                awards_map[vote.post_id].append(f"{j_user.screen_name}賞")
+
+            # (c) ブックマーク数
+            bm_counts = dict(db.session.query(Bookmark.post_id, func.count(Bookmark.id)).filter(Bookmark.post_id.in_(target_post_ids)).group_by(Bookmark.post_id).all())
+            
+            # (d) 閲覧者のブックマーク状況
+            viewer_bms = set()
             if viewer_id:
-                viewer_bookmarks_query = db.session.query(Bookmark.post_id).filter(Bookmark.user_id == viewer_id, Bookmark.post_id.in_(target_post_ids)).all()
-                viewer_bookmarks_set = {pid for (pid,) in viewer_bookmarks_query}
+                viewer_bms = {p for (p,) in db.session.query(Bookmark.post_id).filter(Bookmark.user_id == viewer_id, Bookmark.post_id.in_(target_post_ids)).all()}
 
-            for post in temp_posts:
-                contest_id = post.contest_id
+            # 3. 整形
+            formatted = []
+            for post in target_posts:
+                cid = post.contest_id
+                # ランキング計算 (キャッシュ利用)
+                if cid not in results_cache:
+                    results_cache[cid] = calculate_contest_results(cid) or {}
+                res = results_cache[cid].get(post.id)
                 
-                # ランキング情報の取得（キャッシュ利用）
-                if contest_id not in results_cache:
-                     results_cache[contest_id] = calculate_contest_results(contest_id) or {}
-                
-                rank = None
-                score = 0
-                post_result = results_cache[contest_id].get(post.id)
-                if post_result:
-                    rank = post_result['rank']
-                    score = post_result['score']
+                # 投票者リストのソート (審査員優先)
+                post_voters = voters_map.get(post.id, [])
+                post_voters.sort(key=lambda v: v['is_judge'], reverse=True)
 
-                formatted_data.append({
+                formatted.append({
                     'post_id': post.id,
                     'content': post.content,
+                    'images': post.images,
                     'created_at': post.created_at.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
-                    'contest': { 'id': post.contest.id, 'name': post.contest.name, 'theme': post.contest.theme },
-                    'user': { 'screen_name': post.user.screen_name, 'profile_image_url': post.user.profile_image_url },
-                    'rank': rank,
-                    'score': score,
-                    'bookmarkCount': bookmark_counts_map.get(post.id, 0),
-                    'isBookmarked': post.id in viewer_bookmarks_set
+                    'contest': {
+                        'id': post.contest.id,
+                        'name': post.contest.name,
+                        'theme': post.contest.theme
+                    },
+                    'user': {
+                        'screen_name': post.user.screen_name,
+                        'profile_image_url': post.user.profile_image_url
+                    },
+                    'rank': res['rank'] if res else None,
+                    'score': res['score'] if res else 0,
+                    'bookmarkCount': bm_counts.get(post.id, 0),
+                    'isBookmarked': post.id in viewer_bms,
+                    'voters': post_voters,        # 追加: 投票者一覧
+                    'awards': awards_map.get(post.id, []), # 追加: 審査員賞バッジ
+                    'myVotes': my_votes_map.get(post.id, 0) # 追加: 自分の投票数
                 })
-            
-            return formatted_data
+            return formatted
 
-        # 4. ユーザーの投稿を取得
+        # ユーザーの投稿
         user_posts_raw = Post.query.filter_by(user_id=user_id).options(joinedload(Post.contest), joinedload(Post.user)).order_by(Post.created_at.desc()).all()
-        profile_posts_data = format_posts(user_posts_raw)
+        
+        # ブックマークした投稿
+        bookmarks_raw = db.session.query(Post).join(Bookmark, Post.id == Bookmark.post_id).filter(Bookmark.user_id == user_id).options(joinedload(Post.user), joinedload(Post.contest)).order_by(Bookmark.created_at.desc()).all()
 
-        # 5. ユーザーがブックマークした投稿を取得
-        bookmarked_posts_raw = db.session.query(Post).join(Bookmark, Post.id == Bookmark.post_id).filter(Bookmark.user_id == user_id).options(joinedload(Post.user), joinedload(Post.contest)).order_by(Bookmark.created_at.desc()).all()
-        bookmarks_data = format_posts(bookmarked_posts_raw)
+        # いいねした投稿 (一般投票かつcount>0)
+        liked_posts_raw = db.session.query(Post).join(Vote, Post.id == Vote.post_id)\
+            .filter(Vote.user_id == user_id, Vote.is_judge_vote == False, Vote.count > 0)\
+            .options(joinedload(Post.contest), joinedload(Post.user))\
+            .order_by(Vote.created_at.desc()).all()
 
         return jsonify({
-            'user': { 'id': target_user.id, 'screen_name': target_user.screen_name, 'profile_image_url': target_user.profile_image_url },
-            'posts': profile_posts_data,
-            'bookmarks': bookmarks_data
+            'user': {
+                'id': target_user.id,
+                'screen_name': target_user.screen_name,
+                'profile_image_url': target_user.profile_image_url
+            },
+            'posts': format_posts(user_posts_raw),
+            'bookmarks': format_posts(bookmarks_raw),
+            'likes': format_posts(liked_posts_raw)
         })
 
     except Exception as e:
-        print(f"!!! ERROR at GET /api/profile/{screen_name}: {e}")
+        print(e)
         traceback.print_exc()
-        return jsonify({"error": "プロフィール情報の取得に失敗しました。"}), 500
+        return jsonify({"error": "Error"}), 500
     
 
 
 @app.route('/api/contests/<int:contest_id>/posts/<int:post_id>', methods=['PUT'])
 def update_post(contest_id, post_id):
-    if 'user_id' not in session:
-        return jsonify({"error": "ログインが必要です。"}), 401
-
+    if 'user_id' not in session: return jsonify({"error": "Login required"}), 401
     user_id = session['user_id']
-    data = request.get_json()
-    new_content = data.get('content')
+    
+    # 【修正点】415エラー対策: request.get_json() を廃止し、request.form を使用
+    new_content = request.form.get('content')
+    files = request.files.getlist('images')
 
-    if not new_content:
-        return jsonify({"error": "投稿内容がありません。"}), 400
-
+    # テキストも画像もなければエラー（ただし、画像維持の場合はテキストのみでOK）
+    if not new_content and not files: return jsonify({"error": "No content"}), 400
+    
     try:
-        # 編集対象の投稿を検索 (ユーザーIDとコンテストIDも一致するか確認)
         post_to_edit = Post.query.filter_by(id=post_id, user_id=user_id, contest_id=contest_id).first()
+        if not post_to_edit: return jsonify({"error": "Not found"}), 404
+        c = Contest.query.get(contest_id); now = datetime.now(timezone.utc)
+        if not (c.start_time.replace(tzinfo=timezone.utc) <= now < c.end_time.replace(tzinfo=timezone.utc)): return jsonify({"error": "Outside period"}), 403
+        
+        # テキスト更新
+        if new_content is not None:
+            post_to_edit.content = new_content
+        
+        # 画像更新 (送られてきた場合のみ)
+        if files:
+            valid_files = [f for f in files if f and allowed_file(f.filename)]
+            if valid_files:
+                image_urls = []
+                for file in valid_files:
+                    image_urls.append(save_file(file))
+                post_to_edit.images = image_urls
 
-        if not post_to_edit:
-            return jsonify({"error": "編集対象の投稿が見つからないか、編集権限がありません。"}), 404
-
-        # 大会が投稿受付中か確認 (任意だが推奨)
-        contest = Contest.query.get(contest_id)
-        now = datetime.now(timezone.utc)
-        start_time_aware = contest.start_time.replace(tzinfo=timezone.utc)
-        end_time_aware = contest.end_time.replace(tzinfo=timezone.utc)
-        if not (start_time_aware <= now < end_time_aware):
-            return jsonify({"error": "現在は投稿受付期間外のため編集できません。"}), 403
-
-        # 内容を更新して保存
-        post_to_edit.content = new_content
-        post_to_edit.updated_at = datetime.now(timezone.utc) # 更新日時を記録 (モデルにupdated_atが必要)
+        post_to_edit.updated_at = datetime.now(timezone.utc)
         db.session.commit()
-
-        # 更新後の投稿データを返す
         return jsonify({
-            'id': post_to_edit.id,
-            'content': post_to_edit.content,
-            'created_at': post_to_edit.created_at.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
-            'user_id': post_to_edit.user_id,
-            'myVotes': 0 # 編集時にはmyVotesは不要だが、型合わせのため0を返す
+            'id': post_to_edit.id, 
+            'content': post_to_edit.content, 
+            'images': post_to_edit.images, 
+            'created_at': post_to_edit.created_at.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(), 
+            'user_id': post_to_edit.user_id, 
+            'myVotes': 0
         }), 200
-
-    except Exception as e:
+    except Exception as e: 
         db.session.rollback()
-        print(f"!!! ERROR at PUT /api/contests/{contest_id}/posts/{post_id}: {e}")
-        traceback.print_exc()
-        return jsonify({"error": "投稿の編集中にエラーが発生しました。"}), 500
+        print(e)
+        return jsonify({"error": "Error"}), 500
     
 @app.route('/api/admin/contests/management')
 def get_management_contests():
@@ -1004,5 +1048,5 @@ def toggle_bookmark(post_id):
         return jsonify({"error": "ブックマーク処理中にエラーが発生しました。"}), 500
 
 if __name__ == '__main__':
-    app.run(port=5001, debug=True)
+    app.run(port=5001, debug=False)
 
