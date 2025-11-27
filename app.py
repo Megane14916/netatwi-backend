@@ -2,6 +2,7 @@ import os
 import traceback
 import logging
 import uuid
+import json
 import boto3 # R2用
 from werkzeug.utils import secure_filename
 from flask import Flask, jsonify, session, request, redirect, url_for
@@ -15,6 +16,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import func, case, distinct
 from sqlalchemy.orm import joinedload
 from werkzeug.middleware.proxy_fix import ProxyFix
+from urllib.parse import urlparse
 
 
 load_dotenv()
@@ -133,6 +135,32 @@ def save_file(file):
         # ここではバックエンドのURLを返す必要がある (CORS等注意)
         # 開発環境では http://localhost:5001/static/uploads/... となる
         return f"/static/uploads/{unique_filename}"
+    
+def delete_file(file_url):
+    """URLからファイルを特定して削除する"""
+    try:
+        if not file_url: return
+
+        # ファイル名の抽出
+        parsed_url = urlparse(file_url)
+        filename = os.path.basename(parsed_url.path)
+
+        if USE_R2:
+            # R2から削除
+            try:
+                s3 = get_r2_client()
+                logger.info(f"Deleting from R2: {filename}")
+                s3.delete_object(Bucket=R2_BUCKET_NAME, Key=filename)
+            except Exception as e:
+                logger.error(f"Failed to delete from R2: {e}")
+        else:
+            # ローカルから削除
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logger.info(f"Deleted local file: {file_path}")
+    except Exception as e:
+        logger.error(f"Error deleting file {file_url}: {e}")
 
 # --- X OAuth Login ---
 X_CONSUMER_KEY = os.environ.get("X_CONSUMER_KEY")
@@ -920,12 +948,21 @@ def update_post(contest_id, post_id):
     if 'user_id' not in session: return jsonify({"error": "Login required"}), 401
     user_id = session['user_id']
     
-    # 【修正点】415エラー対策: request.get_json() を廃止し、request.form を使用
-    new_content = request.form.get('content')
-    files = request.files.getlist('images')
+    # JSONとFormDataの判別
+    if request.content_type and request.content_type.startswith('application/json'):
+        data = request.get_json()
+        new_content = data.get('content')
+        kept_images = data.get('kept_images', [])
+        files = []
+    else:
+        new_content = request.form.get('content')
+        kept_images_str = request.form.get('kept_images', '[]')
+        try: kept_images = json.loads(kept_images_str)
+        except: kept_images = []
+        files = request.files.getlist('images')
 
-    # テキストも画像もなければエラー（ただし、画像維持の場合はテキストのみでOK）
-    if not new_content and not files: return jsonify({"error": "No content"}), 400
+    # テキストも画像もなければエラー（ただし画像全削除＆テキストありはOK）
+    if not new_content and not kept_images and not files: return jsonify({"error": "No content"}), 400
     
     try:
         post_to_edit = Post.query.filter_by(id=post_id, user_id=user_id, contest_id=contest_id).first()
@@ -933,20 +970,33 @@ def update_post(contest_id, post_id):
         c = Contest.query.get(contest_id); now = datetime.now(timezone.utc)
         if not (c.start_time.replace(tzinfo=timezone.utc) <= now < c.end_time.replace(tzinfo=timezone.utc)): return jsonify({"error": "Outside period"}), 403
         
-        # テキスト更新
-        if new_content is not None:
-            post_to_edit.content = new_content
-        
-        # 画像更新 (送られてきた場合のみ)
-        if files:
-            valid_files = [f for f in files if f and allowed_file(f.filename)]
-            if valid_files:
-                image_urls = []
-                for file in valid_files:
-                    image_urls.append(save_file(file))
-                post_to_edit.images = image_urls
+        # 1. 既存画像 (old_images) の取得
+        old_images = post_to_edit.images or []
 
+        # 2. 新しい画像リスト (final_images) の構築
+        final_images = []
+        # 維持する画像 (kept_images) を追加
+        if kept_images:
+            final_images.extend(kept_images)
+        
+        # 新規アップロード画像を追加
+        if files:
+            for file in files:
+                if file and allowed_file(file.filename):
+                    url = save_file(file)
+                    final_images.append(url)
+        
+        # 3. 削除された画像を特定してストレージから削除
+        # old_images にはあるが、final_images にはないもの
+        for old_url in old_images:
+            if old_url not in final_images:
+                delete_file(old_url)
+
+        # 4. DB更新
+        post_to_edit.content = new_content
+        post_to_edit.images = final_images
         post_to_edit.updated_at = datetime.now(timezone.utc)
+        
         db.session.commit()
         return jsonify({
             'id': post_to_edit.id, 
