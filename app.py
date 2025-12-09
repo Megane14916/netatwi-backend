@@ -188,9 +188,9 @@ def log_request_info():
 def twitter_login():
     try:
         # リクエスト元のオリジンを取得
-        origin = request.headers.get('Origin')
+        origin = request.args.get('origin') or request.headers.get('Referer')
         # オリジンが許可リストにあるか確認 (なければリストの最初=メインサイトへ)
-        target_frontend = origin if origin in ALLOWED_ORIGINS else ALLOWED_ORIGINS[0]
+        target_frontend = origin if origin else ALLOWED_ORIGINS[0]
         
         # セッションに「戻るべきフロントエンドのURL」を保存
         session['frontend_url'] = target_frontend.rstrip('/')
@@ -217,7 +217,7 @@ def twitter_login():
         logger.info(f"Saved to session - Token: {session.get('oauth_token')}")
         
         authorization_url = twitter.authorization_url(AUTHORIZE_URL)
-        return jsonify({'authorization_url': authorization_url})
+        return redirect(authorization_url)
     except Exception as e:
         logger.error(f"!!! ERROR at /api/login/twitter: {e}")
         traceback.print_exc()
@@ -293,7 +293,7 @@ def twitter_callback():
         db.session.rollback()
         return redirect(f"{target_url}?login_error=callback_failed") # target_url を使用
     
-    
+    target_url = session.get('frontend_url', ALLOWED_ORIGINS[0])
     return redirect(target_url)
 
 # (以降のコードは変更ありません)
