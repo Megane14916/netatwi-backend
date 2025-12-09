@@ -22,11 +22,11 @@ from urllib.parse import urlparse
 load_dotenv()
 
 # --- 環境変数の読み込みと検証 ---
-# Renderで設定した環境変数を読み込む
 db_uri = os.environ.get('SQLALCHEMY_DATABASE_URI')
 secret_key = os.environ.get('SECRET_KEY')
 frontend_url = os.environ.get('FRONTEND_URL').rstrip('/') #例: "https://netatwi-frontend.vercel.app"
 gcp_backend_url = os.environ.get('GCR_URL') # GCPで設定したCloud RunのURL
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 
 # FLASK_DEBUGがTrueの場合 (ローカルの.envファイル) のみローカル開発とみなす
 is_local_dev = os.environ.get('FLASK_DEBUG') == 'True' 
@@ -81,7 +81,7 @@ JST = timezone(timedelta(hours=9), 'JST')
 
 # --- CORS設定 (最重要) ---
 # 環境変数から読み取ったフロントエンドのURLを許可する
-CORS(app, supports_credentials=True, origins=[frontend_url])
+CORS(app, supports_credentials=True, origins=[ALLOWED_ORIGINS])
 # ---
 db.init_app(app)
 migrate = Migrate(app, db)
@@ -184,19 +184,20 @@ def log_request_info():
         logger.info(f"X-Forwarded-Proto: {request.headers.get('X-Forwarded-Proto')}")
         logger.info(f"Is Secure (Flask detected): {request.is_secure}")
 
-# --- X OAuth Login ---
-X_CONSUMER_KEY = os.environ.get("X_CONSUMER_KEY")
-X_CONSUMER_SECRET = os.environ.get("X_CONSUMER_SECRET")
-REQUEST_TOKEN_URL = "https://api.twitter.com/oauth/request_token"
-AUTHORIZE_URL = "https://api.twitter.com/oauth/authorize"
-ACCESS_TOKEN_URL = "https://api.twitter.com/oauth/access_token"
-USER_INFO_URL = "https://api.twitter.com/1.1/account/verify_credentials.json"
-
 @app.route("/api/login/twitter")
 def twitter_login():
     try:
-        # 強制的にHTTPSスキームでコールバックURLを生成
-        callback_url = f"{frontend_url}/api/callback/twitter"
+        # リクエスト元のオリジンを取得
+        origin = request.headers.get('Origin')
+        # オリジンが許可リストにあるか確認 (なければリストの最初=メインサイトへ)
+        target_frontend = origin if origin in ALLOWED_ORIGINS else ALLOWED_ORIGINS[0]
+        
+        # セッションに「戻るべきフロントエンドのURL」を保存
+        session['frontend_url'] = target_frontend.rstrip('/')
+
+        # コールバックURLはバックエンドのURL（固定）
+        # ※ここは変えなくてOK。X側から戻ってくるのは常にバックエンドのこのURLです
+        callback_url = f"{request.url_root.rstrip('/')}/api/callback/twitter"
         
         # 念のためhttpが含まれていたら置換
         if callback_url.startswith("http://"):
@@ -233,6 +234,7 @@ def twitter_callback():
 
     logger.info(f"Retrieved from session - Token: {oauth_token}, Verifier: {verifier}")
 
+    target_url = session.get('frontend_url', ALLOWED_ORIGINS[0])
 
     if not all([oauth_token, oauth_token_secret, verifier]):
         logger.error("Missing token or verifier in callback.")
@@ -243,7 +245,7 @@ def twitter_callback():
             reason = "verifier_missing"
         else:
             reason = "unknown_missing"
-        return redirect(f"{frontend_url}?login_error={reason}") # frontend_url を使用
+        return redirect(f"{target_url}?login_error={reason}") # frontend_url を使用
 
     try:
         oauth_session = OAuth1Session(
@@ -289,9 +291,10 @@ def twitter_callback():
         print(f"!!! ERROR at /api/callback/twitter: {e}")
         traceback.print_exc()
         db.session.rollback()
-        return redirect(f"{frontend_url}?login_error=callback_failed") # frontend_url を使用
+        return redirect(f"{target_url}?login_error=callback_failed") # target_url を使用
     
-    return redirect(frontend_url) # frontend_url を使用
+    
+    return redirect(target_url)
 
 # (以降のコードは変更ありません)
 # ...
