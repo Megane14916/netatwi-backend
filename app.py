@@ -26,6 +26,7 @@ db_uri = os.environ.get('SQLALCHEMY_DATABASE_URI')
 secret_key = os.environ.get('SECRET_KEY')
 frontend_url = os.environ.get('FRONTEND_URL').rstrip('/') #例: "https://netatwi-frontend.vercel.app"
 gcp_backend_url = os.environ.get('GCR_URL') # GCPで設定したCloud RunのURL
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 
 # FLASK_DEBUGがTrueの場合 (ローカルの.envファイル) のみローカル開発とみなす
 is_local_dev = os.environ.get('FLASK_DEBUG') == 'True' 
@@ -81,7 +82,7 @@ JST = timezone(timedelta(hours=9), 'JST')
 
 # --- CORS設定 (最重要) ---
 # 環境変数から読み取ったフロントエンドのURLを許可する
-CORS(app, supports_credentials=True, origins=[frontend_url])
+CORS(app, supports_credentials=True, origins=[ALLOWED_ORIGINS])
 # ---
 db.init_app(app)
 migrate = Migrate(app, db)
