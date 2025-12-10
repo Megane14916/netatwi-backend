@@ -187,16 +187,15 @@ def log_request_info():
 @app.route("/api/login/twitter")
 def twitter_login():
     try:
-        # リクエスト元のオリジンを取得
+        # クエリパラメータから戻り先を取得
         origin = request.args.get('origin') or request.headers.get('Referer')
-        # オリジンが許可リストにあるか確認 (なければリストの最初=メインサイトへ)
         target_frontend = origin if origin else ALLOWED_ORIGINS[0]
         
-        # セッションに「戻るべきフロントエンドのURL」を保存
-        session['frontend_url'] = target_frontend.rstrip('/')
+        # セッションに戻り先を保存
+        if target_frontend:
+             session['frontend_url'] = target_frontend.rstrip('/')
 
-        # コールバックURLはバックエンドのURL（固定）
-        # ※ここは変えなくてOK。X側から戻ってくるのは常にバックエンドのこのURLです
+        # コールバックURL
         callback_url = f"{request.url_root.rstrip('/')}/api/callback/twitter"
         
         # 念のためhttpが含まれていたら置換
@@ -217,7 +216,8 @@ def twitter_login():
         logger.info(f"Saved to session - Token: {session.get('oauth_token')}")
         
         authorization_url = twitter.authorization_url(AUTHORIZE_URL)
-        return redirect(authorization_url)
+        return jsonify({'authorization_url': authorization_url})
+    
     except Exception as e:
         logger.error(f"!!! ERROR at /api/login/twitter: {e}")
         traceback.print_exc()
@@ -234,8 +234,6 @@ def twitter_callback():
 
     logger.info(f"Retrieved from session - Token: {oauth_token}, Verifier: {verifier}")
 
-    target_url = session.get('frontend_url', ALLOWED_ORIGINS[0])
-
     if not all([oauth_token, oauth_token_secret, verifier]):
         logger.error("Missing token or verifier in callback.")
         # エラーの詳細をクエリパラメータに付与してリダイレクト
@@ -245,7 +243,7 @@ def twitter_callback():
             reason = "verifier_missing"
         else:
             reason = "unknown_missing"
-        return redirect(f"{target_url}?login_error={reason}") # frontend_url を使用
+        return redirect(f"{frontend_url}?login_error={reason}") # frontend_url を使用
 
     try:
         oauth_session = OAuth1Session(
@@ -291,7 +289,7 @@ def twitter_callback():
         print(f"!!! ERROR at /api/callback/twitter: {e}")
         traceback.print_exc()
         db.session.rollback()
-        return redirect(f"{target_url}?login_error=callback_failed") # target_url を使用
+        return redirect(f"{frontend_url}?login_error=callback_failed") # target_url を使用
     
     target_url = session.get('frontend_url', ALLOWED_ORIGINS[0])
     return redirect(target_url)
