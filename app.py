@@ -74,6 +74,7 @@ app.config.update(
     #   ログインセッションが維持できなくなる可能性があります。
     #   ローカル開発で動作させる場合は False に戻すか、localhostをhttps化してください。
     SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
     MAX_CONTENT_LENGTH=16 * 1024 * 1024 
 )
 
@@ -187,9 +188,13 @@ def log_request_info():
 @app.route("/api/login/twitter")
 def twitter_login():
     try:
+        logger.info("=== LOGIN START ===") # ログ追加
+
         # クエリパラメータから戻り先を取得
         origin = request.args.get('origin') or request.headers.get('Referer')
         target_frontend = origin if origin else ALLOWED_ORIGINS[0]
+
+        session.clear()
         
         # セッションに戻り先を保存
         if target_frontend:
@@ -197,6 +202,7 @@ def twitter_login():
 
         # コールバックURL
         callback_url = f"{request.url_root.rstrip('/')}/api/callback/twitter"
+        logger.info(f"Callback URL: {callback_url}")
         
         # 念のためhttpが含まれていたら置換
         if callback_url.startswith("http://"):
@@ -212,6 +218,8 @@ def twitter_login():
         session['oauth_token_secret'] = response.get("oauth_token_secret")
 
         session.modified = True
+
+        logger.info(f"Session stored: {session.keys()}")
         
         logger.info(f"Saved to session - Token: {session.get('oauth_token')}")
         
@@ -226,13 +234,16 @@ def twitter_login():
 @app.route('/api/callback/twitter')
 def twitter_callback():
     logger.info(f"=== CALLBACK START ===")
-    logger.info(f"Session keys present: {list(session.keys())}")
+    logger.info(f"Cookies: {request.cookies}") # Cookieが届いているか確認
+    logger.info(f"Session: {list(session.keys())}") # セッションの中身確認
 
     oauth_token = session.pop('oauth_token', None)
     oauth_token_secret = session.pop('oauth_token_secret', None)
     verifier = request.args.get('oauth_verifier')
 
     logger.info(f"Retrieved from session - Token: {oauth_token}, Verifier: {verifier}")
+
+    target_url = session.get('frontend_url', ALLOWED_ORIGINS[0])
 
     if not all([oauth_token, oauth_token_secret, verifier]):
         logger.error("Missing token or verifier in callback.")
@@ -243,7 +254,7 @@ def twitter_callback():
             reason = "verifier_missing"
         else:
             reason = "unknown_missing"
-        return redirect(f"{frontend_url}?login_error={reason}") # frontend_url を使用
+        return redirect(f"{target_url}?login_error={reason}")
 
     try:
         oauth_session = OAuth1Session(
@@ -289,9 +300,8 @@ def twitter_callback():
         print(f"!!! ERROR at /api/callback/twitter: {e}")
         traceback.print_exc()
         db.session.rollback()
-        return redirect(f"{frontend_url}?login_error=callback_failed") # target_url を使用
+        return redirect(f"{target_url}?login_error=callback_failed") # target_url を使用
     
-    target_url = session.get('frontend_url', ALLOWED_ORIGINS[0])
     return redirect(target_url)
 
 # (以降のコードは変更ありません)
