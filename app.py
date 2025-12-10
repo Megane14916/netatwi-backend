@@ -22,7 +22,6 @@ from urllib.parse import urlparse
 load_dotenv()
 
 # --- 環境変数の読み込みと検証 ---
-# Renderで設定した環境変数を読み込む
 db_uri = os.environ.get('SQLALCHEMY_DATABASE_URI')
 secret_key = os.environ.get('SECRET_KEY')
 frontend_url = os.environ.get('FRONTEND_URL').rstrip('/') #例: "https://netatwi-frontend.vercel.app"
@@ -74,6 +73,7 @@ app.config.update(
     #   ログインセッションが維持できなくなる可能性があります。
     #   ローカル開発で動作させる場合は False に戻すか、localhostをhttps化してください。
     SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
     MAX_CONTENT_LENGTH=16 * 1024 * 1024 
 )
 
@@ -184,15 +184,7 @@ def log_request_info():
         logger.info(f"X-Forwarded-Proto: {request.headers.get('X-Forwarded-Proto')}")
         logger.info(f"Is Secure (Flask detected): {request.is_secure}")
 
-# --- X OAuth Login ---
-X_CONSUMER_KEY = os.environ.get("X_CONSUMER_KEY")
-X_CONSUMER_SECRET = os.environ.get("X_CONSUMER_SECRET")
-REQUEST_TOKEN_URL = "https://api.twitter.com/oauth/request_token"
-AUTHORIZE_URL = "https://api.twitter.com/oauth/authorize"
-ACCESS_TOKEN_URL = "https://api.twitter.com/oauth/access_token"
-USER_INFO_URL = "https://api.twitter.com/1.1/account/verify_credentials.json"
-
-@app.route("/api/login/twitter")
+app.route("/api/login/twitter")
 def twitter_login():
     try:
         # 強制的にHTTPSスキームでコールバックURLを生成
@@ -267,17 +259,20 @@ def twitter_callback():
             user = User(
                 twitter_id=user_data.get('id_str'), 
                 screen_name=user_data.get('screen_name'),
+                name = user_data.get('name'),
                 profile_image_url=user_data.get('profile_image_url_https', '').replace('_normal', '')
             )
             db.session.add(user)
         else:
             user.screen_name = user_data.get('screen_name')
+            user.name = user_data.get('name')
             user.profile_image_url = user_data.get('profile_image_url_https', '').replace('_normal', '')
         
         db.session.commit()
         
         session['user_id'] = user.id
         session['screen_name'] = user.screen_name
+        session['name'] = user.name
         session['profile_image_url'] = user.profile_image_url
 
         logger.info(f"Login successful for user: {user.screen_name}")
@@ -357,6 +352,7 @@ def get_current_user():
         user_data['user'] = {
             'id': session['user_id'],
             'screen_name': session['screen_name'],
+            'name': session.get('name'),
             'profile_image_url': session.get('profile_image_url')
         }
         # --- ▼▼▼ set ではなく list を使うように修正 ▼▼▼ ---
@@ -713,20 +709,20 @@ def get_contest_results(id):
         award_badges = {} # post_id -> ["審査員名賞", ...]
 
         for vote, judge_user, post in judge_awards_query:
-            award_name = f"{judge_user.screen_name}賞"
+            award_name = f"{judge_user.name}賞"
             # 結果リスト表示用バッジ
             if post.id not in award_badges: award_badges[post.id] = []
             award_badges[post.id].append(award_name)
             
             # 審査員賞タブ表示用データ
             judge_awards_data.append({
-                'judge': { 'screen_name': judge_user.screen_name, 'profile_image_url': judge_user.profile_image_url },
+                'judge': { 'screen_name': judge_user.screen_name, 'name': judge_user.name, 'profile_image_url': judge_user.profile_image_url },
                 'comment': vote.judge_comment,
                 'post': {
                     'post_id': post.id,
                     'content': post.content,
                     'images': post.images,
-                    'user': { 'screen_name': post.user.screen_name, 'profile_image_url': post.user.profile_image_url },
+                    'user': { 'screen_name': post.user.screen_name, 'name': post.user.name, 'profile_image_url': post.user.profile_image_url },
                     'created_at': post.created_at.replace(tzinfo=timezone.utc).astimezone(JST).isoformat()
                 }
             })
@@ -737,7 +733,7 @@ def get_contest_results(id):
         for vote, user in all_votes_query:
             if vote.post_id not in voters_by_post: voters_by_post[vote.post_id] = []
             # 投票者リスト表示: 審査員の場合は点数も表示したいのでcountを含める
-            voters_by_post[vote.post_id].append({ 'screen_name': user.screen_name, 'count': vote.count, 'is_judge': vote.is_judge_vote })
+            voters_by_post[vote.post_id].append({ 'screen_name': user.screen_name, 'name': user.name, 'count': vote.count, 'is_judge': vote.is_judge_vote })
         
         post_ids = [p.id for p in all_posts]
         bookmark_counts = dict(db.session.query(Bookmark.post_id, func.count(Bookmark.id)).filter(Bookmark.post_id.in_(post_ids)).group_by(Bookmark.post_id).all())
@@ -756,7 +752,7 @@ def get_contest_results(id):
                 'images': post.images,
                 'created_at': post.created_at.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
                 'score': post_result['score'],
-                'user': { 'screen_name': post.user.screen_name, 'profile_image_url': post.user.profile_image_url },
+                'user': { 'screen_name': post.user.screen_name, 'name': post.user.name, 'profile_image_url': post.user.profile_image_url },
                 'voters': post_voters,
                 'bookmarkCount': bookmark_counts.get(post.id, 0),
                 'isBookmarked': post.id in user_bookmarks,
@@ -854,6 +850,7 @@ def get_user_profile_updated(screen_name):
                 # 審査員の場合は点数も表示したいのでcountを含める
                 voters_map[vote.post_id].append({
                     'screen_name': v_user.screen_name,
+                    'name': v_user.name,
                     'count': vote.count,
                     'is_judge': vote.is_judge_vote
                 })
@@ -866,7 +863,7 @@ def get_user_profile_updated(screen_name):
             awards_map = {} # post_id -> ["xxx賞", ...]
             for vote, j_user in awards_data:
                 if vote.post_id not in awards_map: awards_map[vote.post_id] = []
-                awards_map[vote.post_id].append(f"{j_user.screen_name}賞")
+                awards_map[vote.post_id].append(f"{j_user.name}賞")
 
             # (c) ブックマーク数
             bm_counts = dict(db.session.query(Bookmark.post_id, func.count(Bookmark.id)).filter(Bookmark.post_id.in_(target_post_ids)).group_by(Bookmark.post_id).all())
@@ -901,6 +898,7 @@ def get_user_profile_updated(screen_name):
                     },
                     'user': {
                         'screen_name': post.user.screen_name,
+                        'name': post.user.name,
                         'profile_image_url': post.user.profile_image_url
                     },
                     'rank': res['rank'] if res else None,
@@ -929,6 +927,7 @@ def get_user_profile_updated(screen_name):
             'user': {
                 'id': target_user.id,
                 'screen_name': target_user.screen_name,
+                'name': target_user.name,
                 'profile_image_url': target_user.profile_image_url
             },
             'posts': format_posts(user_posts_raw),
