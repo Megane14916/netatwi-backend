@@ -2,6 +2,7 @@ import os
 import traceback
 import logging
 import uuid
+import json
 import boto3 # R2用
 from werkzeug.utils import secure_filename
 from flask import Flask, jsonify, session, request, redirect, url_for
@@ -15,12 +16,12 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import func, case, distinct
 from sqlalchemy.orm import joinedload
 from werkzeug.middleware.proxy_fix import ProxyFix
+from urllib.parse import urlparse
 
 
 load_dotenv()
 
 # --- 環境変数の読み込みと検証 ---
-# Renderで設定した環境変数を読み込む
 db_uri = os.environ.get('SQLALCHEMY_DATABASE_URI')
 secret_key = os.environ.get('SECRET_KEY')
 frontend_url = os.environ.get('FRONTEND_URL').rstrip('/') #例: "https://netatwi-frontend.vercel.app"
@@ -72,6 +73,7 @@ app.config.update(
     #   ログインセッションが維持できなくなる可能性があります。
     #   ローカル開発で動作させる場合は False に戻すか、localhostをhttps化してください。
     SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
     MAX_CONTENT_LENGTH=16 * 1024 * 1024 
 )
 
@@ -133,6 +135,32 @@ def save_file(file):
         # ここではバックエンドのURLを返す必要がある (CORS等注意)
         # 開発環境では http://localhost:5001/static/uploads/... となる
         return f"/static/uploads/{unique_filename}"
+    
+def delete_file(file_url):
+    """URLからファイルを特定して削除する"""
+    try:
+        if not file_url: return
+
+        # ファイル名の抽出
+        parsed_url = urlparse(file_url)
+        filename = os.path.basename(parsed_url.path)
+
+        if USE_R2:
+            # R2から削除
+            try:
+                s3 = get_r2_client()
+                logger.info(f"Deleting from R2: {filename}")
+                s3.delete_object(Bucket=R2_BUCKET_NAME, Key=filename)
+            except Exception as e:
+                logger.error(f"Failed to delete from R2: {e}")
+        else:
+            # ローカルから削除
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logger.info(f"Deleted local file: {file_path}")
+    except Exception as e:
+        logger.error(f"Error deleting file {file_url}: {e}")
 
 # --- X OAuth Login ---
 X_CONSUMER_KEY = os.environ.get("X_CONSUMER_KEY")
@@ -167,8 +195,21 @@ USER_INFO_URL = "https://api.twitter.com/1.1/account/verify_credentials.json"
 @app.route("/api/login/twitter")
 def twitter_login():
     try:
-        # 強制的にHTTPSスキームでコールバックURLを生成
-        callback_url = f"{frontend_url}/api/callback/twitter"
+        logger.info("=== LOGIN START ===") # ログ追加
+
+        # クエリパラメータから戻り先を取得
+        origin = request.args.get('origin') or request.headers.get('Referer')
+        target_frontend = origin if origin else ALLOWED_ORIGINS[0]
+
+        session.clear()
+        
+        # セッションに戻り先を保存
+        if target_frontend:
+             session['frontend_url'] = target_frontend.rstrip('/')
+
+        # コールバックURL
+        callback_url = f"{request.url_root.rstrip('/')}/api/callback/twitter"
+        logger.info(f"Callback URL: {callback_url}")
         
         # 念のためhttpが含まれていたら置換
         if callback_url.startswith("http://"):
@@ -184,11 +225,14 @@ def twitter_login():
         session['oauth_token_secret'] = response.get("oauth_token_secret")
 
         session.modified = True
+
+        logger.info(f"Session stored: {session.keys()}")
         
         logger.info(f"Saved to session - Token: {session.get('oauth_token')}")
         
         authorization_url = twitter.authorization_url(AUTHORIZE_URL)
         return jsonify({'authorization_url': authorization_url})
+    
     except Exception as e:
         logger.error(f"!!! ERROR at /api/login/twitter: {e}")
         traceback.print_exc()
@@ -197,7 +241,8 @@ def twitter_login():
 @app.route('/api/callback/twitter')
 def twitter_callback():
     logger.info(f"=== CALLBACK START ===")
-    logger.info(f"Session keys present: {list(session.keys())}")
+    logger.info(f"Cookies: {request.cookies}") # Cookieが届いているか確認
+    logger.info(f"Session: {list(session.keys())}") # セッションの中身確認
 
     oauth_token = session.pop('oauth_token', None)
     oauth_token_secret = session.pop('oauth_token_secret', None)
@@ -205,6 +250,7 @@ def twitter_callback():
 
     logger.info(f"Retrieved from session - Token: {oauth_token}, Verifier: {verifier}")
 
+    target_url = session.get('frontend_url', ALLOWED_ORIGINS[0])
 
     if not all([oauth_token, oauth_token_secret, verifier]):
         logger.error("Missing token or verifier in callback.")
@@ -215,7 +261,7 @@ def twitter_callback():
             reason = "verifier_missing"
         else:
             reason = "unknown_missing"
-        return redirect(f"{frontend_url}?login_error={reason}") # frontend_url を使用
+        return redirect(f"{target_url}?login_error={reason}")
 
     try:
         oauth_session = OAuth1Session(
@@ -239,17 +285,20 @@ def twitter_callback():
             user = User(
                 twitter_id=user_data.get('id_str'), 
                 screen_name=user_data.get('screen_name'),
+                name = user_data.get('name'),
                 profile_image_url=user_data.get('profile_image_url_https', '').replace('_normal', '')
             )
             db.session.add(user)
         else:
             user.screen_name = user_data.get('screen_name')
+            user.name = user_data.get('name')
             user.profile_image_url = user_data.get('profile_image_url_https', '').replace('_normal', '')
         
         db.session.commit()
         
         session['user_id'] = user.id
         session['screen_name'] = user.screen_name
+        session['name'] = user.name
         session['profile_image_url'] = user.profile_image_url
 
         logger.info(f"Login successful for user: {user.screen_name}")
@@ -258,9 +307,9 @@ def twitter_callback():
         print(f"!!! ERROR at /api/callback/twitter: {e}")
         traceback.print_exc()
         db.session.rollback()
-        return redirect(f"{frontend_url}?login_error=callback_failed") # frontend_url を使用
+        return redirect(f"{target_url}?login_error=callback_failed") # target_url を使用
     
-    return redirect(frontend_url) # frontend_url を使用
+    return redirect(target_url)
 
 # (以降のコードは変更ありません)
 # ...
@@ -329,6 +378,7 @@ def get_current_user():
         user_data['user'] = {
             'id': session['user_id'],
             'screen_name': session['screen_name'],
+            'name': session.get('name'),
             'profile_image_url': session.get('profile_image_url')
         }
         # --- ▼▼▼ set ではなく list を使うように修正 ▼▼▼ ---
@@ -685,20 +735,20 @@ def get_contest_results(id):
         award_badges = {} # post_id -> ["審査員名賞", ...]
 
         for vote, judge_user, post in judge_awards_query:
-            award_name = f"{judge_user.screen_name}賞"
+            award_name = f"{judge_user.name}賞"
             # 結果リスト表示用バッジ
             if post.id not in award_badges: award_badges[post.id] = []
             award_badges[post.id].append(award_name)
             
             # 審査員賞タブ表示用データ
             judge_awards_data.append({
-                'judge': { 'screen_name': judge_user.screen_name, 'profile_image_url': judge_user.profile_image_url },
+                'judge': { 'screen_name': judge_user.screen_name, 'name': judge_user.name, 'profile_image_url': judge_user.profile_image_url },
                 'comment': vote.judge_comment,
                 'post': {
                     'post_id': post.id,
                     'content': post.content,
                     'images': post.images,
-                    'user': { 'screen_name': post.user.screen_name, 'profile_image_url': post.user.profile_image_url },
+                    'user': { 'screen_name': post.user.screen_name, 'name': post.user.name, 'profile_image_url': post.user.profile_image_url },
                     'created_at': post.created_at.replace(tzinfo=timezone.utc).astimezone(JST).isoformat()
                 }
             })
@@ -709,7 +759,7 @@ def get_contest_results(id):
         for vote, user in all_votes_query:
             if vote.post_id not in voters_by_post: voters_by_post[vote.post_id] = []
             # 投票者リスト表示: 審査員の場合は点数も表示したいのでcountを含める
-            voters_by_post[vote.post_id].append({ 'screen_name': user.screen_name, 'count': vote.count, 'is_judge': vote.is_judge_vote })
+            voters_by_post[vote.post_id].append({ 'screen_name': user.screen_name, 'name': user.name, 'count': vote.count, 'is_judge': vote.is_judge_vote })
         
         post_ids = [p.id for p in all_posts]
         bookmark_counts = dict(db.session.query(Bookmark.post_id, func.count(Bookmark.id)).filter(Bookmark.post_id.in_(post_ids)).group_by(Bookmark.post_id).all())
@@ -728,7 +778,7 @@ def get_contest_results(id):
                 'images': post.images,
                 'created_at': post.created_at.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
                 'score': post_result['score'],
-                'user': { 'screen_name': post.user.screen_name, 'profile_image_url': post.user.profile_image_url },
+                'user': { 'screen_name': post.user.screen_name, 'name': post.user.name, 'profile_image_url': post.user.profile_image_url },
                 'voters': post_voters,
                 'bookmarkCount': bookmark_counts.get(post.id, 0),
                 'isBookmarked': post.id in user_bookmarks,
@@ -826,6 +876,7 @@ def get_user_profile_updated(screen_name):
                 # 審査員の場合は点数も表示したいのでcountを含める
                 voters_map[vote.post_id].append({
                     'screen_name': v_user.screen_name,
+                    'name': v_user.name,
                     'count': vote.count,
                     'is_judge': vote.is_judge_vote
                 })
@@ -838,7 +889,7 @@ def get_user_profile_updated(screen_name):
             awards_map = {} # post_id -> ["xxx賞", ...]
             for vote, j_user in awards_data:
                 if vote.post_id not in awards_map: awards_map[vote.post_id] = []
-                awards_map[vote.post_id].append(f"{j_user.screen_name}賞")
+                awards_map[vote.post_id].append(f"{j_user.name}賞")
 
             # (c) ブックマーク数
             bm_counts = dict(db.session.query(Bookmark.post_id, func.count(Bookmark.id)).filter(Bookmark.post_id.in_(target_post_ids)).group_by(Bookmark.post_id).all())
@@ -873,6 +924,7 @@ def get_user_profile_updated(screen_name):
                     },
                     'user': {
                         'screen_name': post.user.screen_name,
+                        'name': post.user.name,
                         'profile_image_url': post.user.profile_image_url
                     },
                     'rank': res['rank'] if res else None,
@@ -901,6 +953,7 @@ def get_user_profile_updated(screen_name):
             'user': {
                 'id': target_user.id,
                 'screen_name': target_user.screen_name,
+                'name': target_user.name,
                 'profile_image_url': target_user.profile_image_url
             },
             'posts': format_posts(user_posts_raw),
@@ -920,12 +973,21 @@ def update_post(contest_id, post_id):
     if 'user_id' not in session: return jsonify({"error": "Login required"}), 401
     user_id = session['user_id']
     
-    # 【修正点】415エラー対策: request.get_json() を廃止し、request.form を使用
-    new_content = request.form.get('content')
-    files = request.files.getlist('images')
+    # JSONとFormDataの判別
+    if request.content_type and request.content_type.startswith('application/json'):
+        data = request.get_json()
+        new_content = data.get('content')
+        kept_images = data.get('kept_images', [])
+        files = []
+    else:
+        new_content = request.form.get('content')
+        kept_images_str = request.form.get('kept_images', '[]')
+        try: kept_images = json.loads(kept_images_str)
+        except: kept_images = []
+        files = request.files.getlist('images')
 
-    # テキストも画像もなければエラー（ただし、画像維持の場合はテキストのみでOK）
-    if not new_content and not files: return jsonify({"error": "No content"}), 400
+    # テキストも画像もなければエラー（ただし画像全削除＆テキストありはOK）
+    if not new_content and not kept_images and not files: return jsonify({"error": "No content"}), 400
     
     try:
         post_to_edit = Post.query.filter_by(id=post_id, user_id=user_id, contest_id=contest_id).first()
@@ -933,20 +995,33 @@ def update_post(contest_id, post_id):
         c = Contest.query.get(contest_id); now = datetime.now(timezone.utc)
         if not (c.start_time.replace(tzinfo=timezone.utc) <= now < c.end_time.replace(tzinfo=timezone.utc)): return jsonify({"error": "Outside period"}), 403
         
-        # テキスト更新
-        if new_content is not None:
-            post_to_edit.content = new_content
-        
-        # 画像更新 (送られてきた場合のみ)
-        if files:
-            valid_files = [f for f in files if f and allowed_file(f.filename)]
-            if valid_files:
-                image_urls = []
-                for file in valid_files:
-                    image_urls.append(save_file(file))
-                post_to_edit.images = image_urls
+        # 1. 既存画像 (old_images) の取得
+        old_images = post_to_edit.images or []
 
+        # 2. 新しい画像リスト (final_images) の構築
+        final_images = []
+        # 維持する画像 (kept_images) を追加
+        if kept_images:
+            final_images.extend(kept_images)
+        
+        # 新規アップロード画像を追加
+        if files:
+            for file in files:
+                if file and allowed_file(file.filename):
+                    url = save_file(file)
+                    final_images.append(url)
+        
+        # 3. 削除された画像を特定してストレージから削除
+        # old_images にはあるが、final_images にはないもの
+        for old_url in old_images:
+            if old_url not in final_images:
+                delete_file(old_url)
+
+        # 4. DB更新
+        post_to_edit.content = new_content
+        post_to_edit.images = final_images
         post_to_edit.updated_at = datetime.now(timezone.utc)
+        
         db.session.commit()
         return jsonify({
             'id': post_to_edit.id, 
