@@ -4,6 +4,7 @@ import logging
 import uuid
 import json
 import boto3 # R2用
+import re
 from werkzeug.utils import secure_filename
 from flask import Flask, jsonify, session, request, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
@@ -352,6 +353,33 @@ def calculate_contest_results(contest_id):
         
     return {result['post_id']: result for result in ranked_results}
 
+# --- 文字数カウントロジック (追加) ---
+def calculate_weighted_length(text):
+    """
+    X(Twitter)仕様に合わせた文字数カウント
+    - URL: 一律23文字 (半角換算)
+    - 半角英数字・記号・半角カナ: 1
+    - その他(全角): 2
+    """
+    if not text:
+        return 0
+        
+    # URLを23文字のプレースホルダーに置換
+    # (簡易的な正規表現ですが、一般的なURLには対応)
+    url_pattern = re.compile(r'https?://[\w/:%#\$&\?\(\)~\.=\+\-]+')
+    processed_text = url_pattern.sub('x' * 23, text)
+    
+    length = 0
+    for char in processed_text:
+        code = ord(char)
+        # 半角英数字(ASCII) or 半角カナ等は重み1
+        if (0x00 <= code <= 0x80) or (code == 0xf8f0) or (0xff61 <= code <= 0xff9f):
+            length += 1
+        else:
+            length += 2
+            
+    return length
+
 @app.route('/api/me')
 def get_current_user():
     user_data = { 'logged_in': False }
@@ -637,6 +665,10 @@ def submit_votes(id):
 
     if not isinstance(votes_to_submit, dict):
          return jsonify({"error": "Invalid vote data"}), 400
+    
+    # バリデーション: 文字数チェック
+    if calculate_weighted_length(content) > 280:
+        return jsonify({"error": "Text too long (max 280)"}), 400
 
     try:
         is_judge = id in session.get('judge_for_contest_ids', [])
@@ -970,6 +1002,9 @@ def update_post(contest_id, post_id):
 
     # テキストも画像もなければエラー（ただし画像全削除＆テキストありはOK）
     if not new_content and not kept_images and not files: return jsonify({"error": "No content"}), 400
+
+    if new_content and calculate_weighted_length(new_content) > 280:
+        return jsonify({"error": "Text too long (max 280)"}), 400
     
     try:
         post_to_edit = Post.query.filter_by(id=post_id, user_id=user_id, contest_id=contest_id).first()
