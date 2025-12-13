@@ -355,24 +355,18 @@ def calculate_contest_results(contest_id):
 
 # --- 文字数カウントロジック (追加) ---
 def calculate_weighted_length(text):
-    """
-    X(Twitter)仕様に合わせた文字数カウント
-    - URL: 一律23文字 (半角換算)
-    - 半角英数字・記号・半角カナ: 1
-    - その他(全角): 2
-    """
     if not text:
         return 0
         
-    # URLを23文字のプレースホルダーに置換
-    # (簡易的な正規表現ですが、一般的なURLには対応)
+    # 改行コードの正規化: \r\n -> \n, \r -> \n
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+        
     url_pattern = re.compile(r'https?://[\w/:%#\$&\?\(\)~\.=\+\-]+')
     processed_text = url_pattern.sub('x' * 23, text)
     
     length = 0
     for char in processed_text:
         code = ord(char)
-        # 半角英数字(ASCII) or 半角カナ等は重み1
         if (0x00 <= code <= 0x80) or (code == 0xf8f0) or (0xff61 <= code <= 0xff9f):
             length += 1
         else:
@@ -662,6 +656,10 @@ def submit_votes(id):
     data = request.get_json()
     votes_to_submit = data.get('votes') # { "postId": count }
     judge_award = data.get('judgeAward') # { "postId": 123, "comment": "..." } or null
+    content = request.form.get('content', '')
+
+    if content:
+        content = content.replace('\r\n', '\n').replace('\r', '\n')
 
     if not isinstance(votes_to_submit, dict):
          return jsonify({"error": "Invalid vote data"}), 400
@@ -986,6 +984,8 @@ def get_user_profile_updated(screen_name):
 def update_post(contest_id, post_id):
     if 'user_id' not in session: return jsonify({"error": "Login required"}), 401
     user_id = session['user_id']
+
+    new_content = None
     
     # JSONとFormDataの判別
     if request.content_type and request.content_type.startswith('application/json'):
@@ -999,6 +999,9 @@ def update_post(contest_id, post_id):
         try: kept_images = json.loads(kept_images_str)
         except: kept_images = []
         files = request.files.getlist('images')
+
+    if new_content:
+        new_content = new_content.replace('\r\n', '\n').replace('\r', '\n')
 
     # テキストも画像もなければエラー（ただし画像全削除＆テキストありはOK）
     if not new_content and not kept_images and not files: return jsonify({"error": "No content"}), 400
