@@ -25,7 +25,7 @@ load_dotenv()
 # --- 環境変数の読み込みと検証 ---
 db_uri = os.environ.get('SQLALCHEMY_DATABASE_URI')
 secret_key = os.environ.get('SECRET_KEY')
-frontend_url = os.environ.get('FRONTEND_URL').rstrip('/') #例: "https://netatwi-frontend.vercel.app"
+frontend_url = os.environ.get('FRONTEND_URL', '').rstrip('/')
 gcp_backend_url = os.environ.get('GCR_URL') # GCPで設定したCloud RunのURL
 
 # FLASK_DEBUGがTrueの場合 (ローカルの.envファイル) のみローカル開発とみなす
@@ -45,6 +45,8 @@ if not db_uri:
     raise ValueError("FATAL_ERROR: SQLALCHEMY_DATABASE_URI environment variable is not set.")
 if not secret_key:
     raise ValueError("FATAL_ERROR: SECRET_KEY environment variable is not set.")
+if not frontend_url:
+    raise ValueError("FATAL_ERROR: FRONTEND_URL environment variable is not set.")
 
 app = Flask(__name__)
 
@@ -54,28 +56,34 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- アプリケーション設定 ---
+# 環境に応じたセッションCookie設定
+if is_local_dev:
+    # ローカル開発環境: HTTP対応設定
+    session_cookie_config = {
+        'SESSION_COOKIE_SAMESITE': 'Lax',
+        'SESSION_COOKIE_SECURE': False,
+        'SESSION_COOKIE_DOMAIN': 'localhost',
+    }
+else:
+    # 本番環境: HTTPS対応設定 (Cross-Origin)
+    session_cookie_config = {
+        'SESSION_COOKIE_SAMESITE': 'None',
+        'SESSION_COOKIE_SECURE': True,
+    }
+
 app.config.update(
-    SECRET_KEY=os.environ.get('SECRET_KEY', 'a-very-secret-key-that-is-secure'),
-    SQLALCHEMY_DATABASE_URI=os.environ.get('SQLALCHEMY_DATABASE_URI', 'sqlite:///project.db'),
+    SECRET_KEY=secret_key,
+    SQLALCHEMY_DATABASE_URI=db_uri,
 
     SQLALCHEMY_ENGINE_OPTIONS={
         "pool_pre_ping": True,
-        "pool_recycle": 300, # 5分ごとに接続をリサイクル（念のため）
+        "pool_recycle": 300, # 5分ごとに接続をリサイクル
     },
     
-    # SameSite属性は 'Lax' でOK（CSRF保護のため）
-    SESSION_COOKIE_SAMESITE='None',
-    
-    # localhost環境でのトラブルを避けるため、DOMAIN指定を削除
-    # SESSION_COOKIE_DOMAIN='localhost', 
-    
-    # 【変更】HTTPS環境向けに True に設定
-    # ※ 注意: http://localhost で動かす場合、ブラウザがCookieを送信しなくなるため
-    #   ログインセッションが維持できなくなる可能性があります。
-    #   ローカル開発で動作させる場合は False に戻すか、localhostをhttps化してください。
-    SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
-    MAX_CONTENT_LENGTH=16 * 1024 * 1024 
+    MAX_CONTENT_LENGTH=16 * 1024 * 1024,
+    
+    **session_cookie_config  # 環境に応じた設定を展開
 )
 
 JST = timezone(timedelta(hours=9), 'JST')
@@ -196,12 +204,8 @@ USER_INFO_URL = "https://api.twitter.com/1.1/account/verify_credentials.json"
 @app.route("/api/login/twitter")
 def twitter_login():
     try:
-        # 強制的にHTTPSスキームでコールバックURLを生成
+        # コールバックURLを生成（ローカル環境ではHTTPを使用）
         callback_url = f"{frontend_url}/api/callback/twitter"
-        
-        # 念のためhttpが含まれていたら置換
-        if callback_url.startswith("http://"):
-            callback_url = callback_url.replace("http://", "https://", 1)
 
         logger.info(f"Generated Callback URL: {callback_url}")
 
