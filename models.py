@@ -37,10 +37,15 @@ class Contest(db.Model):
     has_qualifier = db.Column(db.Boolean, nullable=False, default=False)
     allow_images = db.Column(db.Boolean, nullable=False, default=True)
 
-    # --- ▼▼▼ 予選用の時刻カラムを追加 ▼▼▼ ---
-    qualifier_start_time = db.Column(db.DateTime, nullable=True) # 予選投稿開始
-    qualifier_end_time = db.Column(db.DateTime, nullable=True)   # 予選投稿終了
-    qualifier_voting_end_time = db.Column(db.DateTime, nullable=True) # 予選投票終了
+    # --- ▼▼▼ 新規追加カラム (Phase 1) ▼▼▼ ---
+    type = db.Column(db.String(20), nullable=False, default='grandprix')
+    scoring_method = db.Column(db.String(20), nullable=False, default='both')
+    image_rule = db.Column(db.String(20), nullable=False, default='optional')
+    advancement_rate = db.Column(db.Integer, nullable=True)
+    parent_contest_id = db.Column(db.Integer, db.ForeignKey('contest.id'), nullable=True)
+    is_voting_visible = db.Column(db.Boolean, nullable=False, default=True)
+
+    children = db.relationship('Contest', backref=db.backref('parent', remote_side=[id]), lazy=True)
     # --- ▲▲▲ ここまで ▲▲▲ ---
 
     posts = db.relationship('Post', back_populates='contest', lazy=True)
@@ -111,3 +116,32 @@ class Bookmark(db.Model):
 
     # user_id と post_id の組み合わせでユニーク制約
     __table_args__ = (db.UniqueConstraint('user_id', 'post_id', name='uq_user_post_bookmark'),)
+
+class Comment(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    post_id = db.Column(db.Integer, db.ForeignKey('post.id'), nullable=False)
+    content = db.Column(db.String(140), nullable=False)
+    is_judge = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    user = db.relationship('User', backref=db.backref('comments', lazy=True))
+    post = db.relationship('Post', backref=db.backref('comments', lazy=True))
+
+    __table_args__ = (db.UniqueConstraint('user_id', 'post_id', name='uq_user_post_comment'),)
+
+class Notification(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    type = db.Column(db.String(50), nullable=False)
+    post_id = db.Column(db.Integer, db.ForeignKey('post.id'), nullable=True)
+    contest_id = db.Column(db.Integer, db.ForeignKey('contest.id'), nullable=True)
+    is_read = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    user = db.relationship('User', foreign_keys=[user_id], backref=db.backref('notifications', lazy=True))
+    sender = db.relationship('User', foreign_keys=[sender_id])
+    post = db.relationship('Post', backref=db.backref('notifications', lazy=True))
+    contest = db.relationship('Contest', backref=db.backref('notifications', lazy=True))

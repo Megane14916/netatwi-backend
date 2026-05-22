@@ -412,51 +412,88 @@ def create_contest():
         end_time_utc = datetime.fromisoformat(data['endTime'].replace('Z', '+00:00'))
         voting_end_time_utc = datetime.fromisoformat(data['votingEndTime'].replace('Z', '+00:00'))
 
-        # --- ▼▼▼ 予選時刻の処理を追加 ▼▼▼ ---
-        qualifier_start_time_utc = None
-        qualifier_end_time_utc = None
-        qualifier_voting_end_time_utc = None
+        has_theme = data.get('hasTheme', True)
+        theme_value = data.get('theme') if has_theme else None
+        
+        c_type = data.get('type', 'grandprix')
+        scoring_method = data.get('scoringMethod', 'both')
+        image_rule = data.get('imageRule', 'optional')
+        is_voting_visible = data.get('isVotingVisible', True)
+        advancement_rate = int(data.get('advancementRate')) if data.get('advancementRate') else None
+        general_vote_weight = int(data.get('generalVoteWeight', 50))
+        judge_max_score = int(data.get('judgeMaxScore', 10))
+        judge_password = data.get('judgePassword')
 
         if has_qualifier:
-            # 予選ありの場合のみ、予選時刻データを取得・パース
             q_start_str = data.get('qualifierStartTime')
             q_end_str = data.get('qualifierEndTime')
             q_voting_end_str = data.get('qualifierVotingEndTime')
             
-            # データが存在すればdatetimeオブジェクトに変換
-            if q_start_str:
-                qualifier_start_time_utc = datetime.fromisoformat(q_start_str.replace('Z', '+00:00'))
-            if q_end_str:
-                qualifier_end_time_utc = datetime.fromisoformat(q_end_str.replace('Z', '+00:00'))
-            if q_voting_end_str:
-                qualifier_voting_end_time_utc = datetime.fromisoformat(q_voting_end_str.replace('Z', '+00:00'))
-        # --- ▲▲▲ ここまで ▲▲▲ ---
+            q_start_time_utc = datetime.fromisoformat(q_start_str.replace('Z', '+00:00')) if q_start_str else start_time_utc
+            q_end_time_utc = datetime.fromisoformat(q_end_str.replace('Z', '+00:00')) if q_end_str else end_time_utc
+            q_voting_end_time_utc = datetime.fromisoformat(q_voting_end_str.replace('Z', '+00:00')) if q_voting_end_str else voting_end_time_utc
 
-        has_theme = data.get('hasTheme', True)
-        theme_value = data.get('theme') if has_theme else None
-        allow_images = data.get('allowImages', True)
+            qualifier_contest = Contest(
+                name=f"{data['name']} - 予選",
+                theme=data.get('qualifierTheme') if data.get('qualifierHasTheme') else None,
+                has_theme=data.get('qualifierHasTheme', False),
+                has_qualifier=False,
+                type=c_type,
+                scoring_method=data.get('qualifierScoringMethod', 'both'),
+                image_rule=data.get('qualifierImageRule', 'optional'),
+                advancement_rate=advancement_rate,
+                is_voting_visible=data.get('qualifierIsVotingVisible', True),
+                start_time=q_start_time_utc,
+                end_time=q_end_time_utc,
+                voting_end_time=q_voting_end_time_utc,
+                general_vote_weight=int(data.get('qualifierGeneralVoteWeight', 50)),
+                judge_max_score=int(data.get('qualifierJudgeMaxScore', 10)),
+                judge_password=data.get('qualifierJudgePassword')
+            )
+            db.session.add(qualifier_contest)
+            db.session.flush() # ID取得のため
 
-        new_contest = Contest(
-            name=data['name'],
-            theme=theme_value,
-            has_theme=has_theme,
-            has_qualifier=has_qualifier,
-            allow_images=allow_images,
-            start_time=start_time_utc, # 通常/決勝
-            end_time=end_time_utc,     # 通常/決勝
-            voting_end_time=voting_end_time_utc, # 通常/決勝
-            # --- ▼▼▼ 予選時刻を保存 ▼▼▼ ---
-            qualifier_start_time=qualifier_start_time_utc,
-            qualifier_end_time=qualifier_end_time_utc,
-            qualifier_voting_end_time=qualifier_voting_end_time_utc,
-            # --- ▲▲▲ ここまで ▲▲▲ ---
-            general_vote_weight=int(data.get('generalVoteWeight', 50)),
-            judge_max_score=int(data.get('judgeMaxScore', 10)),
-            judge_password=data.get('judgePassword')
-        )
-        db.session.add(new_contest)
-        db.session.commit()
-        return jsonify({"message": "Contest created successfully", "id": new_contest.id}), 201
+            final_contest = Contest(
+                name=f"{data['name']} - 本選",
+                theme=theme_value,
+                has_theme=has_theme,
+                has_qualifier=True,
+                type=c_type,
+                scoring_method=scoring_method,
+                image_rule=image_rule,
+                parent_contest_id=qualifier_contest.id,
+                is_voting_visible=is_voting_visible,
+                start_time=start_time_utc,
+                end_time=end_time_utc,
+                voting_end_time=voting_end_time_utc,
+                general_vote_weight=general_vote_weight,
+                judge_max_score=judge_max_score,
+                judge_password=judge_password
+            )
+            db.session.add(final_contest)
+            db.session.commit()
+            return jsonify({"message": "Contests created successfully", "id": final_contest.id, "qualifier_id": qualifier_contest.id}), 201
+
+        else:
+            new_contest = Contest(
+                name=data['name'],
+                theme=theme_value,
+                has_theme=has_theme,
+                has_qualifier=False,
+                type=c_type,
+                scoring_method=scoring_method,
+                image_rule=image_rule,
+                is_voting_visible=is_voting_visible,
+                start_time=start_time_utc,
+                end_time=end_time_utc,
+                voting_end_time=voting_end_time_utc,
+                general_vote_weight=general_vote_weight,
+                judge_max_score=judge_max_score,
+                judge_password=judge_password
+            )
+            db.session.add(new_contest)
+            db.session.commit()
+            return jsonify({"message": "Contest created successfully", "id": new_contest.id}), 201
     except Exception as e:
         db.session.rollback()
         print(f"!!! ERROR at /api/admin/contests: {e}")
@@ -490,10 +527,9 @@ def get_contests():
             
             c_data = { 
                 'id': contest.id, 'name': contest.name, 'hasTheme': contest.has_theme, 'theme': contest.theme, 'hasQualifier': contest.has_qualifier, 
+                'type': contest.type, 'scoringMethod': contest.scoring_method, 'imageRule': contest.image_rule, 'isVotingVisible': contest.is_voting_visible,
+                'advancementRate': contest.advancement_rate, 'parentContestId': contest.parent_contest_id,
                 'startTime': st.astimezone(JST).isoformat() if st else None, 'endTime': et.astimezone(JST).isoformat() if et else None, 'votingEndTime': vt.astimezone(JST).isoformat() if vt else None, 
-                'qualifierStartTime': contest.qualifier_start_time.replace(tzinfo=timezone.utc).astimezone(JST).isoformat() if contest.qualifier_start_time else None, 
-                'qualifierEndTime': contest.qualifier_end_time.replace(tzinfo=timezone.utc).astimezone(JST).isoformat() if contest.qualifier_end_time else None, 
-                'qualifierVotingEndTime': contest.qualifier_voting_end_time.replace(tzinfo=timezone.utc).astimezone(JST).isoformat() if contest.qualifier_voting_end_time else None, 
                 'generalVoteWeight': contest.general_vote_weight, 'judgeMaxScore': contest.judge_max_score,
                 # 追加フィールド
                 'totalPosters': total_posters,
@@ -535,7 +571,12 @@ def get_contest_details(id):
             'judgeMaxScore': contest.judge_max_score,
             'hasTheme': contest.has_theme,
             'hasQualifier': contest.has_qualifier,
-            'allowImages': contest.allow_images,
+            'type': contest.type,
+            'scoringMethod': contest.scoring_method,
+            'imageRule': contest.image_rule,
+            'isVotingVisible': contest.is_voting_visible,
+            'advancementRate': contest.advancement_rate,
+            'parentContestId': contest.parent_contest_id
             # --- ▲▲▲ ここまで ▲▲▲ ---
         })
     except Exception as e:
