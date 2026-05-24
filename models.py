@@ -41,7 +41,8 @@ class Contest(db.Model):
     type = db.Column(db.String(20), nullable=False, default='grandprix')
     scoring_method = db.Column(db.String(20), nullable=False, default='both')
     image_rule = db.Column(db.String(20), nullable=False, default='optional')
-    advancement_rate = db.Column(db.Integer, nullable=True)
+    advancement_numerator = db.Column(db.Integer, nullable=True) # 予選通過率 (分子)
+    advancement_denominator = db.Column(db.Integer, nullable=True) # 予選通過率 (分母)
     parent_contest_id = db.Column(db.Integer, db.ForeignKey('contest.id'), nullable=True)
     is_voting_visible = db.Column(db.Boolean, nullable=False, default=True)
 
@@ -145,3 +146,18 @@ class Notification(db.Model):
     sender = db.relationship('User', foreign_keys=[sender_id])
     post = db.relationship('Post', backref=db.backref('notifications', lazy=True))
     contest = db.relationship('Contest', backref=db.backref('notifications', lazy=True))
+
+class ContestResult(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    contest_id = db.Column(db.Integer, db.ForeignKey('contest.id'), nullable=False)
+    post_id = db.Column(db.Integer, db.ForeignKey('post.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    score = db.Column(db.Float, nullable=False, default=0.0)
+    rank = db.Column(db.Integer, nullable=False)
+    is_advanced = db.Column(db.Boolean, nullable=False, default=False)
+    is_judge_award = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    contest = db.relationship('Contest', backref=db.backref('results', lazy=True, cascade="all, delete-orphan"))
+    post = db.relationship('Post', backref=db.backref('results', lazy=True, cascade="all, delete-orphan"))
+    user = db.relationship('User', backref=db.backref('results', lazy=True))

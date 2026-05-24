@@ -12,7 +12,7 @@ from flask_migrate import Migrate
 from flask_cors import CORS
 from requests_oauthlib import OAuth1Session
 from dotenv import load_dotenv
-from models import db, User, Contest, Post, Vote, Bookmark
+from models import db, User, Contest, Post, Vote, Bookmark, ContestResult, Comment, Notification
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import func, case, distinct
 from sqlalchemy.orm import joinedload
@@ -303,10 +303,25 @@ def twitter_callback():
 
 def calculate_contest_results(contest_id):
     """
-    計算式: 審査員得票数の合計 + (一般得票数 / 一般投票者数) * general_vote_weight
+    計算式: scoring_method に応じて分岐。
+    投票終了後は ContestResult に保存・キャッシュする。
     """
     contest = Contest.query.get(contest_id)
     if not contest: return None 
+    
+    # キャッシュチェック
+    existing_results = ContestResult.query.filter_by(contest_id=contest_id).all()
+    if existing_results:
+        results_dict = {}
+        for r in existing_results:
+            results_dict[r.post_id] = {
+                'post_id': r.post_id,
+                'rank': r.rank,
+                'score': r.score,
+                'is_advanced': r.is_advanced,
+                'is_judge_award': r.is_judge_award
+            }
+        return results_dict
 
     # 一般投票者の総数（ユニーク）を取得
     total_general_voters = db.session.query(func.count(distinct(Vote.user_id)))\
@@ -315,9 +330,7 @@ def calculate_contest_results(contest_id):
     if total_general_voters is None or total_general_voters == 0:
         total_general_voters = 1
 
-    # 審査員票はそのまま合計 (重みなし)
     judge_score_col = func.sum(case((Vote.is_judge_vote == True, Vote.count), else_=0))
-    # 一般票はいいね数合計
     general_votes_col = func.sum(case((Vote.is_judge_vote == False, Vote.count), else_=0))
 
     results_query = db.session.query(
@@ -329,8 +342,13 @@ def calculate_contest_results(contest_id):
     judge_score_val = func.coalesce(results_query.c.judge_score, 0)
     general_votes_val = func.coalesce(results_query.c.general_votes, 0)
     
-    # 新しい計算式
-    final_score_expr = judge_score_val + (general_votes_val / total_general_voters) * contest.general_vote_weight
+    # 採点方法に基づく計算式
+    if contest.scoring_method == 'user':
+        final_score_expr = general_votes_val
+    elif contest.scoring_method == 'judge':
+        final_score_expr = judge_score_val
+    else: # 'both' or None
+        final_score_expr = judge_score_val + (general_votes_val / total_general_voters) * contest.general_vote_weight
 
     ranked_posts_query = db.session.query(
         Post, 
@@ -341,20 +359,66 @@ def calculate_contest_results(contest_id):
         Post.contest_id == contest_id
     ).order_by(
         final_score_expr.desc(),
-        Post.created_at.asc()
+        Post.created_at.asc() # 同点時の順序用
     )
 
     ranked_results = []
-    current_rank = 0; last_score = -1; rank_counter = 0
+    current_rank = 1
+    last_score = -1
+    skip = 0
+    total_participants = Post.query.filter_by(contest_id=contest_id).count()
+    advancement_cutoff = 0
+    if contest.advancement_numerator is not None and contest.advancement_denominator:
+        advancement_cutoff = (total_participants * contest.advancement_numerator) // contest.advancement_denominator
     
-    for post, total_score in ranked_posts_query.all():
-        rank_counter += 1
+    # 審査員賞の取得
+    judge_awards_query = db.session.query(Vote.post_id).filter(Vote.contest_id == contest_id, Vote.is_judge_award == True).all()
+    judge_awarded_post_ids = {row[0] for row in judge_awards_query}
+
+    for idx, (post, total_score) in enumerate(ranked_posts_query.all()):
         current_score_val = round(total_score, 2) if total_score is not None else 0
-        if current_score_val != last_score: 
-            current_rank = rank_counter
+        if idx == 0:
             last_score = current_score_val
-        ranked_results.append({'post_id': post.id, 'rank': current_rank, 'score': current_score_val})
-        
+            
+        if current_score_val != last_score: 
+            current_rank += 1 + skip
+            skip = 0
+            last_score = current_score_val
+        elif idx > 0:
+            skip += 1
+            
+        is_advanced = current_rank <= advancement_cutoff if advancement_cutoff > 0 else False
+        is_judge_award = post.id in judge_awarded_post_ids
+
+        ranked_results.append({
+            'post_id': post.id, 
+            'user_id': post.user_id,
+            'rank': current_rank, 
+            'score': current_score_val,
+            'is_advanced': is_advanced,
+            'is_judge_award': is_judge_award
+        })
+
+    # 投票期間終了後なら ContestResult に保存
+    now = datetime.now(timezone.utc)
+    if now >= contest.voting_end_time.replace(tzinfo=timezone.utc):
+        for result in ranked_results:
+            cr = ContestResult(
+                contest_id=contest_id,
+                post_id=result['post_id'],
+                user_id=result['user_id'],
+                score=result['score'],
+                rank=result['rank'],
+                is_advanced=result['is_advanced'],
+                is_judge_award=result['is_judge_award']
+            )
+            db.session.add(cr)
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f"Failed to save ContestResult: {e}")
+
     return {result['post_id']: result for result in ranked_results}
 
 # --- 文字数カウントロジック (追加) ---
@@ -387,7 +451,8 @@ def get_current_user():
             'id': session['user_id'],
             'screen_name': session['screen_name'],
             'name': session.get('name'),
-            'profile_image_url': session.get('profile_image_url')
+            'profile_image_url': session.get('profile_image_url'),
+            'isAdmin': session['screen_name'] in [s.strip() for s in os.environ.get('ADMIN_SCREEN_NAMES', 'dummy_admin1,dummy_admin2').split(',') if s.strip()]
         }
         # --- ▼▼▼ set ではなく list を使うように修正 ▼▼▼ ---
         # セッションから 'judge_for_contest_ids' をリストとして取得 (なければ空のリスト)
@@ -401,8 +466,16 @@ def logout():
     session.clear()
     return jsonify({'message': 'Logged out successfully'})
 
+
+
+
 @app.route('/api/admin/contests', methods=['POST'])
 def create_contest():
+    if 'user_id' not in session: return jsonify({"error": "Login required"}), 401
+    allowed_admins = [s.strip() for s in os.environ.get('ADMIN_SCREEN_NAMES', 'dummy_admin1,dummy_admin2').split(',') if s.strip()]
+    if session.get('screen_name') not in allowed_admins:
+        return jsonify({"error": "Forbidden: Admins only"}), 403
+
     data = request.get_json()
     try:
         has_qualifier = data.get('hasQualifier', False)
@@ -419,7 +492,8 @@ def create_contest():
         scoring_method = data.get('scoringMethod', 'both')
         image_rule = data.get('imageRule', 'optional')
         is_voting_visible = data.get('isVotingVisible', True)
-        advancement_rate = int(data.get('advancementRate')) if data.get('advancementRate') else None
+        advancement_numerator = int(data.get('advancementNumerator')) if data.get('advancementNumerator') else None
+        advancement_denominator = int(data.get('advancementDenominator')) if data.get('advancementDenominator') else None
         general_vote_weight = int(data.get('generalVoteWeight', 50))
         judge_max_score = int(data.get('judgeMaxScore', 10))
         judge_password = data.get('judgePassword')
@@ -441,7 +515,8 @@ def create_contest():
                 type=c_type,
                 scoring_method=data.get('qualifierScoringMethod', 'both'),
                 image_rule=data.get('qualifierImageRule', 'optional'),
-                advancement_rate=advancement_rate,
+                advancement_numerator=advancement_numerator,
+                advancement_denominator=advancement_denominator,
                 is_voting_visible=data.get('qualifierIsVotingVisible', True),
                 start_time=q_start_time_utc,
                 end_time=q_end_time_utc,
@@ -528,7 +603,7 @@ def get_contests():
             c_data = { 
                 'id': contest.id, 'name': contest.name, 'hasTheme': contest.has_theme, 'theme': contest.theme, 'hasQualifier': contest.has_qualifier, 
                 'type': contest.type, 'scoringMethod': contest.scoring_method, 'imageRule': contest.image_rule, 'isVotingVisible': contest.is_voting_visible,
-                'advancementRate': contest.advancement_rate, 'parentContestId': contest.parent_contest_id,
+                'advancementNumerator': contest.advancement_numerator, 'advancementDenominator': contest.advancement_denominator, 'parentContestId': contest.parent_contest_id,
                 'startTime': st.astimezone(JST).isoformat() if st else None, 'endTime': et.astimezone(JST).isoformat() if et else None, 'votingEndTime': vt.astimezone(JST).isoformat() if vt else None, 
                 'generalVoteWeight': contest.general_vote_weight, 'judgeMaxScore': contest.judge_max_score,
                 # 追加フィールド
@@ -558,7 +633,12 @@ def get_contests():
 def get_contest_details(id):
     try:
         contest = Contest.query.get_or_404(id)
-        # DBから読み出したUTC時刻にタイムゾーン情報を付与し、JSTに変換して返す
+        user_id = session.get('user_id')
+        is_advanced_to_final = None
+        if user_id and contest.parent_contest_id:
+            qualifier_result = ContestResult.query.filter_by(contest_id=contest.parent_contest_id, user_id=user_id).first()
+            is_advanced_to_final = qualifier_result.is_advanced if qualifier_result else False
+
         return jsonify({
             'id': contest.id,
             'name': contest.name,
@@ -566,7 +646,6 @@ def get_contest_details(id):
             'startTime': contest.start_time.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
             'endTime': contest.end_time.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
             'votingEndTime': contest.voting_end_time.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
-            # --- ▼▼▼ 設定値を追加 ▼▼▼ ---
             'generalVoteWeight': contest.general_vote_weight,
             'judgeMaxScore': contest.judge_max_score,
             'hasTheme': contest.has_theme,
@@ -575,9 +654,10 @@ def get_contest_details(id):
             'scoringMethod': contest.scoring_method,
             'imageRule': contest.image_rule,
             'isVotingVisible': contest.is_voting_visible,
-            'advancementRate': contest.advancement_rate,
-            'parentContestId': contest.parent_contest_id
-            # --- ▲▲▲ ここまで ▲▲▲ ---
+            'advancementNumerator': contest.advancement_numerator,
+            'advancementDenominator': contest.advancement_denominator,
+            'parentContestId': contest.parent_contest_id,
+            'isAdvancedToFinal': is_advanced_to_final
         })
     except Exception as e:
         print(f"!!! ERROR at /api/contests/{id}: {e}")
@@ -660,14 +740,25 @@ def submit_post(id):
         c = Contest.query.get_or_404(id); now = datetime.now(timezone.utc)
         if not (c.start_time.replace(tzinfo=timezone.utc) <= now < c.end_time.replace(tzinfo=timezone.utc)): 
             return jsonify({"error": "Outside period"}), 403
+            
+        # 画像必須のバリデーション
+        valid_files = [f for f in files if f and f.filename]
+        if c.image_rule == 'required' and len(valid_files) == 0:
+            return jsonify({"error": "画像を最低1枚添付してください"}), 400
+            
+        # 決勝コンテストの場合の進出者チェック
+        if c.parent_contest_id:
+            qualifier_result = ContestResult.query.filter_by(contest_id=c.parent_contest_id, user_id=user_id).first()
+            if not qualifier_result or not qualifier_result.is_advanced:
+                return jsonify({"error": "予選を通過していないため、この大会には投稿できません"}), 403
         
         if Post.query.filter_by(user_id=user_id, contest_id=id).first():
              return jsonify({"error": "Already posted"}), 409
 
         # 画像アップロード処理
         image_urls = []
-        for file in files:
-            if file and allowed_file(file.filename):
+        for file in valid_files:
+            if allowed_file(file.filename):
                 url = save_file(file)
                 image_urls.append(url)
         
@@ -839,7 +930,8 @@ def get_contest_results(id):
                 'voters': post_voters,
                 'bookmarkCount': bookmark_counts.get(post.id, 0),
                 'isBookmarked': post.id in user_bookmarks,
-                'awards': award_badges.get(post.id, []) # バッジ情報を追加
+                'awards': award_badges.get(post.id, []), # バッジ情報を追加
+                'is_advanced': post_result.get('is_advanced', False)
             })
         
         results_list.sort(key=lambda x: (x['rank'] is None, x['rank']))
@@ -871,6 +963,9 @@ def judge_login(id):
 
     try:
         contest = Contest.query.get_or_404(id)
+        
+        if contest.scoring_method == 'user':
+            return jsonify({"error": "この大会は一般投票のみのため、審査員として参加できません。"}), 400
 
         if contest.judge_password and contest.judge_password == password:
             # --- ▼▼▼ set ではなく list を使うように修正 ▼▼▼ ---
@@ -977,7 +1072,8 @@ def get_user_profile_updated(screen_name):
                     'contest': {
                         'id': post.contest.id,
                         'name': post.contest.name,
-                        'theme': post.contest.theme
+                        'theme': post.contest.theme,
+                        'scoringMethod': post.contest.scoring_method
                     },
                     'user': {
                         'screen_name': post.user.screen_name,
@@ -1103,8 +1199,10 @@ def update_post(contest_id, post_id):
     
 @app.route('/api/admin/contests/management')
 def get_management_contests():
-    # 本番環境では管理者チェックが必要
-    # if not session.get('is_admin'): return jsonify({"error": "Unauthorized"}), 403
+    if 'user_id' not in session: return jsonify({"error": "Login required"}), 401
+    allowed_admins = [s.strip() for s in os.environ.get('ADMIN_SCREEN_NAMES', 'dummy_admin1,dummy_admin2').split(',') if s.strip()]
+    if session.get('screen_name') not in allowed_admins:
+        return jsonify({"error": "Forbidden: Admins only"}), 403
     
     try:
         now = datetime.now(timezone.utc)
@@ -1137,8 +1235,10 @@ def get_management_contests():
 # --- ▼▼▼ 大会削除APIを新設 ▼▼▼ ---
 @app.route('/api/admin/contests/<int:id>', methods=['DELETE'])
 def delete_contest(id):
-    # 本番環境では管理者チェックが必要
-    # if not session.get('is_admin'): return jsonify({"error": "Unauthorized"}), 403
+    if 'user_id' not in session: return jsonify({"error": "Login required"}), 401
+    allowed_admins = [s.strip() for s in os.environ.get('ADMIN_SCREEN_NAMES', 'dummy_admin1,dummy_admin2').split(',') if s.strip()]
+    if session.get('screen_name') not in allowed_admins:
+        return jsonify({"error": "Forbidden: Admins only"}), 403
 
     try:
         contest_to_delete = Contest.query.get(id)
@@ -1194,6 +1294,181 @@ def toggle_bookmark(post_id):
         print(f"!!! ERROR at POST /api/posts/{post_id}/bookmark: {e}")
         traceback.print_exc()
         return jsonify({"error": "ブックマーク処理中にエラーが発生しました。"}), 500
+
+@app.route('/api/posts/<int:post_id>/like', methods=['POST'])
+def toggle_like(post_id):
+    if 'user_id' not in session: return jsonify({"error": "Login required"}), 401
+    user_id = session['user_id']
+    
+    try:
+        post = Post.query.get_or_404(post_id)
+        c = post.contest
+        now = datetime.now(timezone.utc)
+        
+        # 投票期間中の一般投票は一括APIを使用するため禁止
+        if now < c.voting_end_time.replace(tzinfo=timezone.utc):
+            return jsonify({"error": "Voting is ongoing, use the bulk vote API."}), 403
+            
+        # 審査員のみの大会以外は結果発表後のいいねを禁止（スコアと混同するため）
+        if c.scoring_method != 'judge':
+            return jsonify({"error": "Cannot like during results when user voting is enabled."}), 403
+
+        existing_vote = Vote.query.filter_by(user_id=user_id, post_id=post_id).first()
+        is_liked = False
+        
+        if existing_vote:
+            if existing_vote.is_judge_vote:
+                return jsonify({"error": "審査員として採点済みのため、いいねは追加できません。"}), 400
+            db.session.delete(existing_vote)
+        else:
+            new_vote = Vote(user_id=user_id, post_id=post_id, contest_id=c.id, count=1, is_judge_vote=False, is_judge_award=False)
+            db.session.add(new_vote)
+            is_liked = True
+            
+            # 通知生成
+            if user_id != post.user_id:
+                notification = Notification(
+                    user_id=post.user_id, sender_id=user_id, type='like', post_id=post_id, contest_id=c.id
+                )
+                db.session.add(notification)
+                
+        db.session.commit()
+        
+        # 最新のいいね数
+        like_count = Vote.query.filter_by(post_id=post_id, is_judge_vote=False, count=1).count()
+        return jsonify({"isLiked": is_liked, "likeCount": like_count}), 200
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error toggling like: {e}")
+        return jsonify({"error": "いいね処理中にエラーが発生しました。"}), 500
+
+# --- Phase 4: コメント・通知機能のAPI ---
+
+@app.route('/api/posts/<int:post_id>/comments', methods=['GET'])
+def get_comments(post_id):
+    post = Post.query.get_or_404(post_id)
+    comments = Comment.query.filter_by(post_id=post_id).order_by(Comment.created_at.asc()).all()
+    return jsonify([{
+        'id': c.id,
+        'user_id': c.user_id,
+        'post_id': c.post_id,
+        'content': c.content,
+        'is_judge': c.is_judge,
+        'created_at': c.created_at.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
+        'updated_at': c.updated_at.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
+        'user': {
+            'name': c.user.name,
+            'screen_name': c.user.screen_name,
+            'profile_image_url': c.user.profile_image_url
+        }
+    } for c in comments])
+
+@app.route('/api/posts/<int:post_id>/comments', methods=['POST'])
+def add_comment(post_id):
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    user_id = session['user_id']
+    post = Post.query.get_or_404(post_id)
+    data = request.get_json()
+    content = data.get('content', '').strip()
+    
+    if not content or len(content) > 140:
+        return jsonify({'error': 'Comment must be between 1 and 140 characters'}), 400
+        
+    existing_comment = Comment.query.filter_by(post_id=post_id, user_id=user_id).first()
+    if existing_comment:
+        return jsonify({'error': 'You have already commented on this post'}), 409
+        
+    judge_contests = session.get('judge_for_contest_ids', [])
+    is_judge = post.contest_id in judge_contests
+
+    new_comment = Comment(
+        user_id=user_id,
+        post_id=post_id,
+        content=content,
+        is_judge=is_judge
+    )
+    db.session.add(new_comment)
+    
+    # 結果期間中であれば通知作成
+    contest = post.contest
+    now = datetime.now(timezone.utc)
+    if now >= contest.voting_end_time.replace(tzinfo=timezone.utc) and user_id != post.user_id:
+        notification = Notification(
+            user_id=post.user_id,
+            sender_id=user_id,
+            type='comment',
+            post_id=post_id,
+            contest_id=post.contest_id
+        )
+        db.session.add(notification)
+        
+    db.session.commit()
+    return jsonify({'message': 'Comment added successfully', 'id': new_comment.id}), 201
+
+@app.route('/api/comments/<int:comment_id>', methods=['PUT', 'DELETE'])
+def modify_comment(comment_id):
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+        
+    user_id = session['user_id']
+    comment = Comment.query.get_or_404(comment_id)
+    
+    if comment.user_id != user_id:
+        return jsonify({'error': 'Forbidden'}), 403
+        
+    if request.method == 'DELETE':
+        db.session.delete(comment)
+        db.session.commit()
+        return jsonify({'message': 'Comment deleted'})
+        
+    data = request.get_json()
+    content = data.get('content', '').strip()
+    if not content or len(content) > 140:
+        return jsonify({'error': 'Invalid content length'}), 400
+        
+    comment.content = content
+    db.session.commit()
+    return jsonify({'message': 'Comment updated'})
+
+@app.route('/api/notifications', methods=['GET'])
+def get_notifications():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+        
+    user_id = session['user_id']
+    notifications = Notification.query.filter_by(user_id=user_id).order_by(Notification.created_at.desc()).all()
+    
+    return jsonify([{
+        'id': n.id,
+        'type': n.type,
+        'is_read': n.is_read,
+        'post_id': n.post_id,
+        'contest_id': n.contest_id,
+        'created_at': n.created_at.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
+        'sender': {
+            'name': n.sender.name,
+            'screen_name': n.sender.screen_name,
+            'profile_image_url': n.sender.profile_image_url
+        } if n.sender else None,
+        'post': {
+             'content': n.post.content[:40] + '...' if len(n.post.content) > 40 else n.post.content
+        } if n.post else None,
+        'contest': {
+            'name': n.contest.name
+        } if n.contest else None
+    } for n in notifications])
+
+@app.route('/api/notifications/read', methods=['POST'])
+def mark_notifications_read():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    user_id = session['user_id']
+    
+    Notification.query.filter_by(user_id=user_id, is_read=False).update({'is_read': True})
+    db.session.commit()
+    return jsonify({'message': 'All notifications marked as read'})
 
 if __name__ == '__main__':
     with app.app_context():
