@@ -9,3 +9,6 @@ pycache/
 *.env
 instance/
 migrations/
+.pytest_cache/
+__pycache__/
+static/
