@@ -19,6 +19,11 @@ from sqlalchemy.orm import joinedload
 from werkzeug.middleware.proxy_fix import ProxyFix
 from urllib.parse import urlparse
 
+import secrets
+import hashlib
+import base64
+from requests.auth import HTTPBasicAuth
+from requests_oauthlib import OAuth2Session
 
 load_dotenv()
 
@@ -171,56 +176,58 @@ def delete_file(file_url):
     except Exception as e:
         logger.error(f"Error deleting file {file_url}: {e}")
 
-# --- X OAuth Login ---
-X_CONSUMER_KEY = os.environ.get("X_CONSUMER_KEY")
-X_CONSUMER_SECRET = os.environ.get("X_CONSUMER_SECRET")
-REQUEST_TOKEN_URL = "https://api.twitter.com/oauth/request_token"
-AUTHORIZE_URL = "https://api.twitter.com/oauth/authorize"
-ACCESS_TOKEN_URL = "https://api.twitter.com/oauth/access_token"
-USER_INFO_URL = "https://api.twitter.com/1.1/account/verify_credentials.json"
 
 
+# --- X OAuth 2.0 設定 (古い1.0aの設定2箇所は削除してこれに差し替え) ---
+X_CLIENT_ID = os.environ.get("X_CONSUMER_KEY") # "X_CLIENT_ID" としても良いが、既存の環境変数を流用
+X_CLIENT_SECRET = os.environ.get("X_CONSUMER_SECRET") #"X_CLIENT_SECRET" としても良いが、既存の環境変数を流用
+AUTHORIZE_URL = "https://x.com/i/oauth2/authorize"
+TOKEN_URL = "https://api.x.com/2/oauth2/token"
+USER_INFO_URL = "https://api.x.com/2/users/me"
+X_SCOPES = ["tweet.read", "users.read"]
 
 @app.before_request
 def log_request_info():
-    # ログイン関連のパスのみ詳細ログを出力
     if request.path.startswith("/api/login") or request.path.startswith("/api/callback"):
         logger.info(f"=== REQUEST START: {request.path} ===")
         logger.info(f"Headers: {dict(request.headers)}")
         logger.info(f"Cookies sent from browser: {request.cookies}")
         logger.info(f"Session (before processing): {dict(session)}")
-        # プロキシヘッダーの確認
         logger.info(f"X-Forwarded-Proto: {request.headers.get('X-Forwarded-Proto')}")
         logger.info(f"Is Secure (Flask detected): {request.is_secure}")
-
-# --- X OAuth Login ---
-X_CONSUMER_KEY = os.environ.get("X_CONSUMER_KEY")
-X_CONSUMER_SECRET = os.environ.get("X_CONSUMER_SECRET")
-REQUEST_TOKEN_URL = "https://api.twitter.com/oauth/request_token"
-AUTHORIZE_URL = "https://api.twitter.com/oauth/authorize"
-ACCESS_TOKEN_URL = "https://api.twitter.com/oauth/access_token"
-USER_INFO_URL = "https://api.twitter.com/1.1/account/verify_credentials.json"
 
 @app.route("/api/login/twitter")
 def twitter_login():
     try:
         # コールバックURLを生成（ローカル環境ではHTTPを使用）
         callback_url = f"{frontend_url}/api/callback/twitter"
-
         logger.info(f"Generated Callback URL: {callback_url}")
 
-        twitter = OAuth1Session(X_CONSUMER_KEY, client_secret=X_CONSUMER_SECRET, callback_uri=callback_url)
-        response = twitter.fetch_request_token(REQUEST_TOKEN_URL)
+        # OAuth 2.0 (PKCE) に必要な安全なランダム文字列を生成
+        code_verifier = secrets.token_urlsafe(48)
+        hashed = hashlib.sha256(code_verifier.encode('utf-8')).digest()
         
-        # セッションにトークンを保存
-        session['oauth_token'] = response.get("oauth_token")
-        session['oauth_token_secret'] = response.get("oauth_token_secret")
+        # パディング（=）を除去し、確実にURLセーフなBase64にする
+        code_challenge = base64.urlsafe_b64encode(hashed).decode('utf-8').rstrip('=')
 
+        # OAuth2Session の構築
+        twitter = OAuth2Session(X_CLIENT_ID, redirect_uri=callback_url, scope=X_SCOPES)
+        authorization_url, state = twitter.authorization_url(
+            AUTHORIZE_URL, 
+            code_challenge=code_challenge, 
+            code_challenge_method="s256"  # 👈 ★大文字 "S256" から 小文字 "s256" に修正
+        )
+        
+        # 👈 ★Xの厳格な仕様対策：スコープの区切り文字「+」を「%20」に強制置換
+        authorization_url = authorization_url.replace('+', '%20')
+        
+        # セッションに検証用の値を保存
+        session['oauth_state'] = state
+        session['code_verifier'] = code_verifier
         session.modified = True
         
-        logger.info(f"Saved to session - Token: {session.get('oauth_token')}")
+        logger.info(f"Saved to session - State: {state}")
         
-        authorization_url = twitter.authorization_url(AUTHORIZE_URL)
         return jsonify({'authorization_url': authorization_url})
     except Exception as e:
         logger.error(f"!!! ERROR at /api/login/twitter: {e}")
@@ -232,57 +239,93 @@ def twitter_callback():
     logger.info(f"=== CALLBACK START ===")
     logger.info(f"Session keys present: {list(session.keys())}")
 
-    oauth_token = session.pop('oauth_token', None)
-    oauth_token_secret = session.pop('oauth_token_secret', None)
-    verifier = request.args.get('oauth_verifier')
+    # セッションから検証用データを取得・削除
+    state = session.pop('oauth_state', None)
+    code_verifier = session.pop('code_verifier', None)
+    
+    # Xから返ってきた認可コードを取得
+    code = request.args.get('code')
+    error = request.args.get('error')
 
-    logger.info(f"Retrieved from session - Token: {oauth_token}, Verifier: {verifier}")
+    if error:
+        logger.error(f"X Login Error from URL: {error}")
+        return redirect(f"{frontend_url}?login_error={error}")
 
-
-    if not all([oauth_token, oauth_token_secret, verifier]):
-        logger.error("Missing token or verifier in callback.")
-        # エラーの詳細をクエリパラメータに付与してリダイレクト
-        if not oauth_token:
-            reason = "session_token_missing"
-        elif not verifier:
-            reason = "verifier_missing"
-        else:
-            reason = "unknown_missing"
-        return redirect(f"{frontend_url}?login_error={reason}") # frontend_url を使用
+    if not all([state, code_verifier, code]):
+        logger.error("Missing state, code_verifier, or code in callback.")
+        reason = "session_token_missing" if not state else "verifier_missing"
+        return redirect(f"{frontend_url}?login_error={reason}")
 
     try:
-        oauth_session = OAuth1Session(
-            client_key=X_CONSUMER_KEY, client_secret=X_CONSUMER_SECRET,
-            resource_owner_key=oauth_token, resource_owner_secret=oauth_token_secret,
-            verifier=verifier
-        )
-        access_token_data = oauth_session.fetch_access_token(ACCESS_TOKEN_URL)
+        callback_url = f"{frontend_url}/api/callback/twitter"
         
-        user_session = OAuth1Session(
-            client_key=X_CONSUMER_KEY, client_secret=X_CONSUMER_SECRET,
-            resource_owner_key=access_token_data.get('oauth_token'),
-            resource_owner_secret=access_token_data.get('oauth_token_secret')
+        # 1. アクセストークンの取得
+        twitter = OAuth2Session(X_CLIENT_ID, redirect_uri=callback_url, state=state)
+        auth = HTTPBasicAuth(X_CLIENT_ID, X_CLIENT_SECRET)
+        
+        # token の中身を明示的に取得する
+        token_response = twitter.fetch_token(
+            token_url=TOKEN_URL,
+            client_secret=X_CLIENT_SECRET,
+            code=code,
+            auth=auth,
+            code_verifier=code_verifier
         )
-        response = user_session.get(USER_INFO_URL)
+        
+        # 返ってきたデータからアクセストークンを直接取り出す
+        access_token = token_response.get('access_token')
+        if not access_token:
+            raise ValueError("Token response did not contain access_token")
+            
+        logger.info(f"Access Token successfully fetched (starts with: {access_token[:10]}...)")
+        
+        # 2. ユーザー情報の取得 (★ライブラリのバグを回避するため、通常の requests で直接ヘッダーを指定)
+        import requests
+        headers = {
+            "Authorization": f"Bearer {access_token}" # 👈 ここで確実にトークンを付与
+        }
+        
+        # 無料プランでも安全に動くよう、まずはフィールド指定なしでリクエスト
+        response = requests.get(f"{USER_INFO_URL}?user.fields=profile_image_url", headers=headers)
+        
+        # もしエラーなら、Xから返ってきたエラー内容の詳細をログに出す
+        if response.status_code != 200:
+            logger.error(f"X API Error Response Body: {response.text}")
+            
         response.raise_for_status()
-        user_data = response.json()
+        res_json = response.json()
+        
+        # API v2 のデータ構造からユーザー情報を抽出
+        user_data = res_json.get('data', {})
+        
+        twitter_id = user_data.get('id')
+        screen_name = user_data.get('username') 
+        name = user_data.get('name')
+        
+        # 画像URLは、この基本リクエストが成功した後に次のステップで取得するため、一旦空文字にします
+        profile_image_url = user_data.get('profile_image_url', '').replace('_normal', '') 
 
-        user = User.query.filter_by(twitter_id=user_data.get('id_str')).first()
+        if not twitter_id:
+            raise ValueError("Failed to retrieve user ID from X API v2 json")
+
+        # 3. データベースの更新・保存処理 (ここから下は元のコードのままで大丈夫です)
+        user = User.query.filter_by(twitter_id=twitter_id).first()
         if not user:
             user = User(
-                twitter_id=user_data.get('id_str'), 
-                screen_name=user_data.get('screen_name'),
-                name = user_data.get('name'),
-                profile_image_url=user_data.get('profile_image_url_https', '').replace('_normal', '')
+                twitter_id=twitter_id, 
+                screen_name=screen_name,
+                name=name,
+                profile_image_url=profile_image_url
             )
             db.session.add(user)
         else:
-            user.screen_name = user_data.get('screen_name')
-            user.name = user_data.get('name')
-            user.profile_image_url = user_data.get('profile_image_url_https', '').replace('_normal', '')
+            user.screen_name = screen_name
+            user.name = name
+            user.profile_image_url = profile_image_url
         
         db.session.commit()
         
+        # アプリケーションセッションにユーザー情報をセット
         session['user_id'] = user.id
         session['screen_name'] = user.screen_name
         session['name'] = user.name
@@ -291,12 +334,12 @@ def twitter_callback():
         logger.info(f"Login successful for user: {user.screen_name}")
 
     except Exception as e:
-        print(f"!!! ERROR at /api/callback/twitter: {e}")
+        logger.error(f"!!! ERROR at /api/callback/twitter: {e}")
         traceback.print_exc()
         db.session.rollback()
-        return redirect(f"{frontend_url}?login_error=callback_failed") # frontend_url を使用
+        return redirect(f"{frontend_url}?login_error=callback_failed")
     
-    return redirect(frontend_url) # frontend_url を使用
+    return redirect(frontend_url)
 
 # (以降のコードは変更ありません)
 # ...
