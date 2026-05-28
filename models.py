@@ -46,6 +46,9 @@ class Contest(db.Model):
     parent_contest_id = db.Column(db.Integer, db.ForeignKey('contest.id'), nullable=True)
     is_voting_visible = db.Column(db.Boolean, nullable=False, default=True)
 
+    result_comment_top = db.Column(db.Text, nullable=True)
+    result_comment_bottom = db.Column(db.Text, nullable=True)
+
     children = db.relationship('Contest', backref=db.backref('parent', remote_side=[id]), lazy=True)
     # --- ▲▲▲ ここまで ▲▲▲ ---
 

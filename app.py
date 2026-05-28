@@ -700,7 +700,9 @@ def get_contest_details(id):
             'advancementNumerator': contest.advancement_numerator,
             'advancementDenominator': contest.advancement_denominator,
             'parentContestId': contest.parent_contest_id,
-            'isAdvancedToFinal': is_advanced_to_final
+            'isAdvancedToFinal': is_advanced_to_final,
+            'resultCommentTop': contest.result_comment_top,
+            'resultCommentBottom': contest.result_comment_bottom
         })
     except Exception as e:
         print(f"!!! ERROR at /api/contests/{id}: {e}")
@@ -1266,7 +1268,16 @@ def get_management_contests():
                 'endTime': contest.end_time.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
                 'votingEndTime': contest.voting_end_time.replace(tzinfo=timezone.utc).astimezone(JST).isoformat(),
                 'judgePassword': contest.judge_password, # パスワードも含める
-                # 必要に応じて予選時刻なども追加
+                'type': contest.type,
+                'scoringMethod': contest.scoring_method,
+                'imageRule': contest.image_rule,
+                'generalVoteWeight': contest.general_vote_weight,
+                'judgeMaxScore': contest.judge_max_score,
+                'isVotingVisible': contest.is_voting_visible,
+                'advancementNumerator': contest.advancement_numerator,
+                'advancementDenominator': contest.advancement_denominator,
+                'resultCommentTop': contest.result_comment_top,
+                'resultCommentBottom': contest.result_comment_bottom
             })
         return jsonify(contests_data)
     except Exception as e:
@@ -1274,6 +1285,50 @@ def get_management_contests():
         traceback.print_exc()
         return jsonify({"error": "Failed to fetch contests for management"}), 500
 # --- ▲▲▲ ここまで ▲▲▲ ---
+
+@app.route('/api/admin/contests/<int:id>', methods=['PUT'])
+def update_contest(id):
+    if 'user_id' not in session: return jsonify({"error": "Login required"}), 401
+    allowed_admins = [s.strip() for s in os.environ.get('ADMIN_SCREEN_NAMES', 'dummy_admin1,dummy_admin2').split(',') if s.strip()]
+    if session.get('screen_name') not in allowed_admins:
+        return jsonify({"error": "Forbidden: Admins only"}), 403
+
+    contest = Contest.query.get(id)
+    if not contest:
+        return jsonify({"error": "Contest not found"}), 404
+
+    data = request.get_json()
+    try:
+        # 更新可能なフィールドの更新
+        if 'name' in data: contest.name = data['name']
+        if 'theme' in data: contest.theme = data['theme'] if data.get('hasTheme') else None
+        if 'hasTheme' in data: contest.has_theme = data['hasTheme']
+        if 'type' in data: contest.type = data['type']
+        if 'scoringMethod' in data: contest.scoring_method = data['scoringMethod']
+        if 'imageRule' in data: contest.image_rule = data['imageRule']
+        if 'isVotingVisible' in data: contest.is_voting_visible = data['isVotingVisible']
+        if 'advancementNumerator' in data: contest.advancement_numerator = int(data['advancementNumerator']) if data['advancementNumerator'] else None
+        if 'advancementDenominator' in data: contest.advancement_denominator = int(data['advancementDenominator']) if data['advancementDenominator'] else None
+        if 'generalVoteWeight' in data: contest.general_vote_weight = int(data['generalVoteWeight'])
+        if 'judgeMaxScore' in data: contest.judge_max_score = int(data['judgeMaxScore'])
+        if 'judgePassword' in data: contest.judge_password = data['judgePassword']
+        
+        # 時刻の更新 (ISOフォーマットを想定)
+        if 'startTime' in data: contest.start_time = datetime.fromisoformat(data['startTime'].replace('Z', '+00:00'))
+        if 'endTime' in data: contest.end_time = datetime.fromisoformat(data['endTime'].replace('Z', '+00:00'))
+        if 'votingEndTime' in data: contest.voting_end_time = datetime.fromisoformat(data['votingEndTime'].replace('Z', '+00:00'))
+
+        # コメントの更新
+        if 'resultCommentTop' in data: contest.result_comment_top = data['resultCommentTop']
+        if 'resultCommentBottom' in data: contest.result_comment_bottom = data['resultCommentBottom']
+
+        db.session.commit()
+        return jsonify({"message": "Contest updated successfully"}), 200
+    except Exception as e:
+        db.session.rollback()
+        print(f"!!! ERROR at PUT /api/admin/contests/{id}: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Failed to update contest"}), 500
 
 # --- ▼▼▼ 大会削除APIを新設 ▼▼▼ ---
 @app.route('/api/admin/contests/<int:id>', methods=['DELETE'])
