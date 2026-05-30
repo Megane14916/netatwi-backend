@@ -734,6 +734,13 @@ def get_posts_for_contest(id):
                     'judge_comment': v.judge_comment
                 }
             # --- ▲▲▲ ここまで ▲▲▲ ---
+            
+            # コメント済みかどうかを判定
+            from models import Comment
+            user_comments = Comment.query.filter(Comment.user_id == user_id, Comment.post_id.in_([p.id for p in posts])).all()
+            user_commented_post_ids = {c.post_id for c in user_comments}
+        else:
+            user_commented_post_ids = set()
 
         total_posters = db.session.query(func.count(distinct(Post.user_id))).filter(Post.contest_id == id).scalar() or 0
 
@@ -748,7 +755,8 @@ def get_posts_for_contest(id):
                 'myVotes': user_votes.get(post.id, 0) ,
                 'images': post.images, # 画像URLリストを追加
                 'myJudgeAward': my_vote.get('is_judge_award', False),   # 追加
-                'myJudgeComment': my_vote.get('judge_comment', None)
+                'myJudgeComment': my_vote.get('judge_comment', None),
+                'hasCommented': post.id in user_commented_post_ids
             })
         
         # --- ▼▼▼ レスポンスにフラグを追加 ▼▼▼ ---
@@ -958,6 +966,9 @@ def get_contest_results(id):
         bookmark_counts = dict(db.session.query(Bookmark.post_id, func.count(Bookmark.id)).filter(Bookmark.post_id.in_(post_ids)).group_by(Bookmark.post_id).all())
         user_bookmarks = set()
         if user_id: user_bookmarks = {p for (p,) in db.session.query(Bookmark.post_id).filter(Bookmark.user_id == user_id, Bookmark.post_id.in_(post_ids)).all()}
+        comment_counts = dict(db.session.query(Comment.post_id, func.count(Comment.id)).filter(Comment.post_id.in_(post_ids)).group_by(Comment.post_id).all())
+        user_commented_post_ids = set()
+        if user_id: user_commented_post_ids = {c.post_id for c in Comment.query.filter_by(user_id=user_id).filter(Comment.post_id.in_(post_ids)).all()}
 
         results_list = []
         for post in all_posts:
@@ -974,6 +985,8 @@ def get_contest_results(id):
                 'user': { 'screen_name': post.user.screen_name, 'name': post.user.name, 'profile_image_url': post.user.profile_image_url },
                 'voters': post_voters,
                 'bookmarkCount': bookmark_counts.get(post.id, 0),
+                'commentCount': comment_counts.get(post.id, 0),
+                'hasCommented': post.id in user_commented_post_ids,
                 'isBookmarked': post.id in user_bookmarks,
                 'awards': award_badges.get(post.id, []), # バッジ情報を追加
                 'is_advanced': post_result.get('is_advanced', False)
@@ -1469,10 +1482,11 @@ def add_comment(post_id):
     user_id = session['user_id']
     post = Post.query.get_or_404(post_id)
     data = request.get_json()
-    content = data.get('content', '').strip()
+    raw_content = data.get('content', '')
     
-    if not content or len(content) > 140:
+    if not raw_content.strip() or len(raw_content) > 140:
         return jsonify({'error': 'Comment must be between 1 and 140 characters'}), 400
+    content = raw_content
         
     existing_comment = Comment.query.filter_by(post_id=post_id, user_id=user_id).first()
     if existing_comment:
@@ -1522,11 +1536,11 @@ def modify_comment(comment_id):
         return jsonify({'message': 'Comment deleted'})
         
     data = request.get_json()
-    content = data.get('content', '').strip()
-    if not content or len(content) > 140:
+    raw_content = data.get('content', '')
+    if not raw_content.strip() or len(raw_content) > 140:
         return jsonify({'error': 'Invalid content length'}), 400
         
-    comment.content = content
+    comment.content = raw_content
     db.session.commit()
     return jsonify({'message': 'Comment updated'})
 
