@@ -551,7 +551,7 @@ def create_contest():
             q_voting_end_time_utc = datetime.fromisoformat(q_voting_end_str.replace('Z', '+00:00')) if q_voting_end_str else voting_end_time_utc
 
             qualifier_contest = Contest(
-                name=f"{data['name']} - 予選",
+                name=f"{data['name']} 予選",
                 theme=data.get('qualifierTheme') if data.get('qualifierHasTheme') else None,
                 has_theme=data.get('qualifierHasTheme', False),
                 has_qualifier=False,
@@ -572,7 +572,7 @@ def create_contest():
             db.session.flush() # ID取得のため
 
             final_contest = Contest(
-                name=f"{data['name']} - 本選",
+                name=f"{data['name']} 決勝",
                 theme=theme_value,
                 has_theme=has_theme,
                 has_qualifier=True,
