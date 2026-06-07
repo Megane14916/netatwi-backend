@@ -344,27 +344,17 @@ def twitter_callback():
 # (以降のコードは変更ありません)
 # ...
 
-def calculate_contest_results(contest_id):
+def generate_contest_results(contest_id):
     """
-    計算式: scoring_method に応じて分岐。
-    投票終了後は ContestResult に保存・キャッシュする。
+    定期バッチ専用：結果を集計し、ContestResult に保存する。
     """
     contest = Contest.query.get(contest_id)
     if not contest: return None 
     
-    # キャッシュチェック
-    existing_results = ContestResult.query.filter_by(contest_id=contest_id).all()
+    # すでに集計済みの場合はスキップ
+    existing_results = ContestResult.query.filter_by(contest_id=contest_id).first()
     if existing_results:
-        results_dict = {}
-        for r in existing_results:
-            results_dict[r.post_id] = {
-                'post_id': r.post_id,
-                'rank': r.rank,
-                'score': r.score,
-                'is_advanced': r.is_advanced,
-                'is_judge_award': r.is_judge_award
-            }
-        return results_dict
+        return
 
     # 一般投票者の総数（ユニーク）を取得
     total_general_voters = db.session.query(func.count(distinct(Vote.user_id)))\
@@ -433,36 +423,39 @@ def calculate_contest_results(contest_id):
         is_advanced = current_rank <= advancement_cutoff if advancement_cutoff > 0 else False
         is_judge_award = post.id in judge_awarded_post_ids
 
-        ranked_results.append({
-            'post_id': post.id, 
-            'user_id': post.user_id,
-            'rank': current_rank, 
-            'score': current_score_val,
-            'is_advanced': is_advanced,
-            'is_judge_award': is_judge_award
-        })
+        cr = ContestResult(
+            contest_id=contest_id,
+            post_id=post.id,
+            user_id=post.user_id,
+            score=current_score_val,
+            rank=current_rank,
+            is_advanced=is_advanced,
+            is_judge_award=is_judge_award
+        )
+        db.session.add(cr)
 
-    # 投票期間終了後なら ContestResult に保存
-    now = datetime.now(timezone.utc)
-    if now >= contest.voting_end_time.replace(tzinfo=timezone.utc):
-        for result in ranked_results:
-            cr = ContestResult(
-                contest_id=contest_id,
-                post_id=result['post_id'],
-                user_id=result['user_id'],
-                score=result['score'],
-                rank=result['rank'],
-                is_advanced=result['is_advanced'],
-                is_judge_award=result['is_judge_award']
-            )
-            db.session.add(cr)
-        try:
-            db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            print(f"Failed to save ContestResult: {e}")
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"Failed to save ContestResult: {e}")
 
-    return {result['post_id']: result for result in ranked_results}
+def get_cached_contest_results(contest_id):
+    """
+    API呼び出し用：DBに保存済みの ContestResult から結果を取得して返す。
+    バッチが未実行でデータがない場合は空の辞書を返す。
+    """
+    existing_results = ContestResult.query.filter_by(contest_id=contest_id).all()
+    results_dict = {}
+    for r in existing_results:
+        results_dict[r.post_id] = {
+            'post_id': r.post_id,
+            'rank': r.rank,
+            'score': r.score,
+            'is_advanced': r.is_advanced,
+            'is_judge_award': r.is_judge_award
+        }
+    return results_dict
 
 # --- 文字数カウントロジック (追加) ---
 def calculate_weighted_length(text):
@@ -928,7 +921,7 @@ def get_contest_results(id):
         all_posts = Post.query.options(joinedload(Post.user)).filter(Post.contest_id == id).all()
         if not all_posts: return jsonify({'contest': {'id': c.id, 'name': c.name, 'theme': c.theme}, 'results': [], 'judgeAwards': [], 'totalPosters': 0, 'totalVoters': 0})
         
-        contest_results = calculate_contest_results(id) or {}
+        contest_results = get_cached_contest_results(id)
         
         # --- 審査員賞の取得 ---
         judge_awards_query = db.session.query(Vote, User, Post).join(User, Vote.user_id == User.id).join(Post, Vote.post_id == Post.id).filter(Vote.contest_id == id, Vote.is_judge_award == True).all()
@@ -1115,7 +1108,7 @@ def get_user_profile_updated(screen_name):
                 cid = post.contest_id
                 # ランキング計算 (キャッシュ利用)
                 if cid not in results_cache:
-                    results_cache[cid] = calculate_contest_results(cid) or {}
+                    results_cache[cid] = get_cached_contest_results(cid)
                 res = results_cache[cid].get(post.id)
                 
                 # 投票者リストのソート (審査員優先)
@@ -1551,7 +1544,13 @@ def get_notifications():
         
     user_id = session['user_id']
     notifications = Notification.query.filter_by(user_id=user_id).order_by(Notification.created_at.desc()).all()
-    
+    def get_comment_content(n):
+        if n.type == 'comment':
+            c = Comment.query.filter_by(post_id=n.post_id, user_id=n.sender_id).order_by(Comment.created_at.desc()).first()
+            if c:
+                return c.content[:40] + '...' if len(c.content) > 40 else c.content
+        return None
+
     return jsonify([{
         'id': n.id,
         'type': n.type,
@@ -1567,8 +1566,12 @@ def get_notifications():
         'post': {
              'content': n.post.content[:40] + '...' if len(n.post.content) > 40 else n.post.content
         } if n.post else None,
+        'comment': {
+             'content': get_comment_content(n)
+        } if n.type == 'comment' else None,
         'contest': {
-            'name': n.contest.name
+            'name': n.contest.name,
+            'type': n.contest.type
         } if n.contest else None
     } for n in notifications])
 
@@ -1581,6 +1584,62 @@ def mark_notifications_read():
     Notification.query.filter_by(user_id=user_id, is_read=False).update({'is_read': True})
     db.session.commit()
     return jsonify({'message': 'All notifications marked as read'})
+
+@app.cli.command("process-contests")
+def process_contests_command():
+    """定期実行バッチ: 大会の状態変化を検知して通知送信や結果集計を行う"""
+    print("--- process-contests batch started ---")
+    now = datetime.now(timezone.utc)
+    contests = Contest.query.all()
+    all_users = None
+
+    for contest in contests:
+        changed = False
+        
+        # 投稿開始
+        if contest.start_time and contest.start_time.replace(tzinfo=timezone.utc) <= now and not contest.notified_post_start:
+            print(f"[{contest.id}] Post start notification")
+            if all_users is None: all_users = User.query.all()
+            for u in all_users:
+                db.session.add(Notification(user_id=u.id, type='contest_post_start', contest_id=contest.id))
+            contest.notified_post_start = True
+            changed = True
+            
+        # 投票開始
+        if contest.end_time and contest.end_time.replace(tzinfo=timezone.utc) <= now and not contest.notified_voting_start:
+            print(f"[{contest.id}] Voting start notification")
+            if all_users is None: all_users = User.query.all()
+            for u in all_users:
+                db.session.add(Notification(user_id=u.id, type='contest_voting_start', contest_id=contest.id))
+            contest.notified_voting_start = True
+            changed = True
+            
+        # 結果発表
+        if contest.voting_end_time and contest.voting_end_time.replace(tzinfo=timezone.utc) <= now and not contest.notified_result_announce:
+            print(f"[{contest.id}] Result announce notification & calculation")
+            generate_contest_results(contest.id)
+            if all_users is None: all_users = User.query.all()
+            for u in all_users:
+                db.session.add(Notification(user_id=u.id, type='contest_result_announce', contest_id=contest.id))
+            contest.notified_result_announce = True
+            changed = True
+            
+        if changed:
+            db.session.commit()
+            print(f"[{contest.id}] Committed changes")
+            
+    # --- 古い通知の自動削除 (30日経過) ---
+    cutoff_date = now - timedelta(days=30)
+    try:
+        deleted_count = Notification.query.filter(Notification.created_at < cutoff_date).delete(synchronize_session=False)
+        if deleted_count > 0:
+            db.session.commit()
+            print(f"Deleted {deleted_count} old notifications (older than 30 days)")
+    except Exception as e:
+        db.session.rollback()
+        print(f"Failed to delete old notifications: {e}")
+
+    print("--- process-contests batch completed ---")
 
 if __name__ == '__main__':
     with app.app_context():

@@ -48,6 +48,11 @@ class Contest(db.Model):
 
     result_comment_top = db.Column(db.Text, nullable=True)
     result_comment_bottom = db.Column(db.Text, nullable=True)
+    
+    # バッチ処理用の通知完了フラグ
+    notified_post_start = db.Column(db.Boolean, nullable=False, default=False)
+    notified_voting_start = db.Column(db.Boolean, nullable=False, default=False)
+    notified_result_announce = db.Column(db.Boolean, nullable=False, default=False)
 
     children = db.relationship('Contest', backref=db.backref('parent', remote_side=[id]), lazy=True)
     # --- ▲▲▲ ここまで ▲▲▲ ---
