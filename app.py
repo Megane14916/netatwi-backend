@@ -1641,6 +1641,98 @@ def process_contests_command():
 
     print("--- process-contests batch completed ---")
 
+@app.cli.command("update-user-stats")
+def update_user_stats():
+    """Update UserStats table by aggregating ContestResult data"""
+    from models import db, User, UserStats, Contest, ContestResult
+    from sqlalchemy import func, case
+    print("--- update-user-stats batch started ---")
+    
+    gp_1st = func.sum(case(((Contest.type == 'grandprix') & (ContestResult.rank == 1), 1), else_=0)).label('gp_1st')
+    gp_2nd = func.sum(case(((Contest.type == 'grandprix') & (ContestResult.rank == 2), 1), else_=0)).label('gp_2nd')
+    gp_3rd = func.sum(case(((Contest.type == 'grandprix') & (ContestResult.rank == 3), 1), else_=0)).label('gp_3rd')
+    daily_1st = func.sum(case(((Contest.type == 'daily') & (ContestResult.rank == 1), 1), else_=0)).label('daily_1st')
+    daily_2nd = func.sum(case(((Contest.type == 'daily') & (ContestResult.rank == 2), 1), else_=0)).label('daily_2nd')
+    daily_3rd = func.sum(case(((Contest.type == 'daily') & (ContestResult.rank == 3), 1), else_=0)).label('daily_3rd')
+    judge_awards = func.sum(case((ContestResult.is_judge_award == True, 1), else_=0)).label('judge_awards')
+
+    results = db.session.query(
+        User.id,
+        gp_1st, gp_2nd, gp_3rd,
+        daily_1st, daily_2nd, daily_3rd,
+        judge_awards
+    ).outerjoin(ContestResult, User.id == ContestResult.user_id)\
+     .outerjoin(Contest, ContestResult.contest_id == Contest.id)\
+     .group_by(User.id).all()
+
+    for row in results:
+        user_id = row[0]
+        stats = UserStats.query.filter_by(user_id=user_id).first()
+        if not stats:
+            stats = UserStats(user_id=user_id)
+            db.session.add(stats)
+        
+        stats.gp_1st = row.gp_1st or 0
+        stats.gp_2nd = row.gp_2nd or 0
+        stats.gp_3rd = row.gp_3rd or 0
+        stats.daily_1st = row.daily_1st or 0
+        stats.daily_2nd = row.daily_2nd or 0
+        stats.daily_3rd = row.daily_3rd or 0
+        stats.judge_awards = row.judge_awards or 0
+
+    db.session.commit()
+    print("--- update-user-stats batch completed ---")
+
+@app.route('/api/users', methods=['GET'])
+def get_users_list():
+    from models import User, UserStats
+    from sqlalchemy import asc
+    
+    search_query = request.args.get('q', '')
+    page = request.args.get('page', 1, type=int)
+    per_page = 100
+    
+    query = User.query
+    if search_query:
+        search_term = f"%{search_query}%"
+        query = query.filter(db.or_(
+            User.name.ilike(search_term),
+            User.screen_name.ilike(search_term),
+            User.twitter_id.ilike(search_term)
+        ))
+        
+    query = query.order_by(asc(User.name))
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    
+    users_data = []
+    for user in pagination.items:
+        stats = user.stats
+        users_data.append({
+            'id': user.id,
+            'twitter_id': user.twitter_id,
+            'name': user.name,
+            'screen_name': user.screen_name,
+            'profile_image_url': user.profile_image_url,
+            'stats': {
+                'gp_1st': stats.gp_1st if stats else 0,
+                'gp_2nd': stats.gp_2nd if stats else 0,
+                'gp_3rd': stats.gp_3rd if stats else 0,
+                'daily_1st': stats.daily_1st if stats else 0,
+                'daily_2nd': stats.daily_2nd if stats else 0,
+                'daily_3rd': stats.daily_3rd if stats else 0,
+                'judge_awards': stats.judge_awards if stats else 0
+            }
+        })
+        
+    return jsonify({
+        'users': users_data,
+        'page': pagination.page,
+        'total_pages': pagination.pages,
+        'total_items': pagination.total,
+        'has_next': pagination.has_next,
+        'has_prev': pagination.has_prev
+    }), 200
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
