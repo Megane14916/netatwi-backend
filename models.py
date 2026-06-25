@@ -187,4 +187,9 @@ class UserStats(db.Model):
     updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     user = db.relationship('User', backref=db.backref('stats', uselist=False, lazy=True))
+
+class News(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    tweet_id = db.Column(db.String(80), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
