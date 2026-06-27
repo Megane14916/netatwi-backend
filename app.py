@@ -1079,31 +1079,35 @@ def get_user_profile_updated(screen_name):
             if not target_posts:
                 return []
 
-            # 2. 一括データ取得
+            # 2. 一括データ取得 (パフォーマンス向上のため、フルORMオブジェクトではなく必要なカラムのみタプルで取得)
             # (a) 投票データ (投票者リスト構築用)
-            votes_data = db.session.query(Vote, User).join(User, Vote.user_id == User.id).filter(Vote.post_id.in_(target_post_ids)).all()
+            votes_data = db.session.query(Vote.post_id, Vote.count, Vote.is_judge_vote, Vote.user_id, User.screen_name, User.name)\
+                .join(User, Vote.user_id == User.id)\
+                .filter(Vote.post_id.in_(target_post_ids)).all()
             voters_map = {} # post_id -> [voter_dict, ...]
             my_votes_map = {} # post_id -> count (閲覧者が投票した数)
 
-            for vote, v_user in votes_data:
-                if vote.post_id not in voters_map: voters_map[vote.post_id] = []
+            for v_post_id, v_count, v_is_judge_vote, v_user_id, u_screen_name, u_name in votes_data:
+                if v_post_id not in voters_map: voters_map[v_post_id] = []
                 # 審査員の場合は点数も表示したいのでcountを含める
-                voters_map[vote.post_id].append({
-                    'screen_name': v_user.screen_name,
-                    'name': v_user.name,
-                    'count': vote.count,
-                    'is_judge': vote.is_judge_vote
+                voters_map[v_post_id].append({
+                    'screen_name': u_screen_name,
+                    'name': u_name,
+                    'count': v_count,
+                    'is_judge': v_is_judge_vote
                 })
                 # 閲覧者の投票状況を確認
-                if viewer_id and vote.user_id == viewer_id:
-                    my_votes_map[vote.post_id] = vote.count
+                if viewer_id and v_user_id == viewer_id:
+                    my_votes_map[v_post_id] = v_count
 
             # (b) 審査員賞データ (バッジ用)
-            awards_data = db.session.query(Vote, User).join(User, Vote.user_id == User.id).filter(Vote.post_id.in_(target_post_ids), Vote.is_judge_award == True).all()
+            awards_data = db.session.query(Vote.post_id, User.name)\
+                .join(User, Vote.user_id == User.id)\
+                .filter(Vote.post_id.in_(target_post_ids), Vote.is_judge_award == True).all()
             awards_map = {} # post_id -> ["xxx賞", ...]
-            for vote, j_user in awards_data:
-                if vote.post_id not in awards_map: awards_map[vote.post_id] = []
-                awards_map[vote.post_id].append(f"{j_user.name}賞")
+            for a_post_id, u_name in awards_data:
+                if a_post_id not in awards_map: awards_map[a_post_id] = []
+                awards_map[a_post_id].append(f"{u_name}賞")
 
             # (c) ブックマーク数
             bm_counts = dict(db.session.query(Bookmark.post_id, func.count(Bookmark.id)).filter(Bookmark.post_id.in_(target_post_ids)).group_by(Bookmark.post_id).all())
