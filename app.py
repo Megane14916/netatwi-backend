@@ -1779,7 +1779,7 @@ def get_users_list():
     page = request.args.get('page', 1, type=int)
     per_page = 100
     
-    query = User.query
+    query = User.query.options(joinedload(User.stats))
     if search_query:
         search_term = f"%{search_query}%"
         query = query.filter(db.or_(
