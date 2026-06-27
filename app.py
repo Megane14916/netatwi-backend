@@ -626,15 +626,26 @@ def get_contests():
         now = datetime.now(timezone.utc)
         ongoing, voting, upcoming, closed_list, closed_data = [], [], [], [], []
         latest_result = None
+
+        # 投稿者数・投票者数・審査員数を大会ごとに一括で集計 (N+1問題の解消)
+        post_counts = db.session.query(Post.contest_id, func.count(distinct(Post.user_id))).group_by(Post.contest_id).all()
+        post_count_map = {row[0]: row[1] for row in post_counts}
+
+        vote_counts = db.session.query(Vote.contest_id, func.count(distinct(Vote.user_id))).group_by(Vote.contest_id).all()
+        vote_count_map = {row[0]: row[1] for row in vote_counts}
+
+        judge_counts = db.session.query(Vote.contest_id, func.count(distinct(Vote.user_id))).filter(Vote.is_judge_vote == True).group_by(Vote.contest_id).all()
+        judge_count_map = {row[0]: row[1] for row in judge_counts}
+
         for contest in contests:
             st = contest.start_time.replace(tzinfo=timezone.utc) if contest.start_time else None
             et = contest.end_time.replace(tzinfo=timezone.utc) if contest.end_time else None
             vt = contest.voting_end_time.replace(tzinfo=timezone.utc) if contest.voting_end_time else None
             
-            # 投稿者数・投票者数の計算
-            total_posters = db.session.query(func.count(distinct(Post.user_id))).filter(Post.contest_id == contest.id).scalar() or 0
-            total_voters = db.session.query(func.count(distinct(Vote.user_id))).filter(Vote.contest_id == contest.id).scalar() or 0
-            total_judges = db.session.query(func.count(distinct(Vote.user_id))).filter(Vote.contest_id == contest.id, Vote.is_judge_vote == True).scalar() or 0
+            # 事前集計した辞書から取得
+            total_posters = post_count_map.get(contest.id, 0)
+            total_voters = vote_count_map.get(contest.id, 0)
+            total_judges = judge_count_map.get(contest.id, 0)
             
             c_data = { 
                 'id': contest.id, 'name': contest.name, 'hasTheme': contest.has_theme, 'theme': contest.theme, 'hasQualifier': contest.has_qualifier, 
