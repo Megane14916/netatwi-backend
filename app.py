@@ -1630,12 +1630,28 @@ def get_notifications():
         return jsonify({'error': 'Unauthorized'}), 401
         
     user_id = session['user_id']
-    notifications = Notification.query.filter_by(user_id=user_id).order_by(Notification.created_at.desc()).all()
+    notifications = Notification.query.filter_by(user_id=user_id)\
+        .options(
+            joinedload(Notification.sender),
+            joinedload(Notification.post),
+            joinedload(Notification.contest)
+        )\
+        .order_by(Notification.created_at.desc()).all()
+
+    # コメント取得のN+1問題解消（対象のpost_idを一括取得してマッピング）
+    comment_pairs = [(n.post_id, n.sender_id) for n in notifications if n.type == 'comment']
+    comment_map = {}
+    if comment_pairs:
+        post_ids = list(set([p[0] for p in comment_pairs]))
+        comments = Comment.query.filter(Comment.post_id.in_(post_ids)).order_by(Comment.created_at.desc()).all()
+        for c in comments:
+            key = (c.post_id, c.user_id)
+            if key not in comment_map: # order_by desc なので最初に見つかったものが最新
+                comment_map[key] = c.content[:40] + '...' if len(c.content) > 40 else c.content
+
     def get_comment_content(n):
         if n.type == 'comment':
-            c = Comment.query.filter_by(post_id=n.post_id, user_id=n.sender_id).order_by(Comment.created_at.desc()).first()
-            if c:
-                return c.content[:40] + '...' if len(c.content) > 40 else c.content
+            return comment_map.get((n.post_id, n.sender_id))
         return None
 
     return jsonify([{
