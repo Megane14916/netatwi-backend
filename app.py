@@ -882,6 +882,12 @@ def submit_votes(id):
         for pid_str, count_val in votes_to_submit.items():
             try:
                 post_id = int(pid_str)
+                
+                # 自分の投稿への投票を禁止
+                post = db.session.get(Post, post_id)
+                if not post or post.user_id == user_id:
+                    continue
+
                 count = float(count_val)
                 if is_judge_voting_now:
                     if not (0 <= count <= max_score): raise ValueError
@@ -1497,6 +1503,10 @@ def toggle_like(post_id):
     
     try:
         post = Post.query.get_or_404(post_id)
+        
+        if post.user_id == user_id:
+            return jsonify({"error": "Cannot like your own post."}), 403
+
         c = post.contest
         now = datetime.now(timezone.utc)
         
