@@ -1803,13 +1803,13 @@ def update_user_stats():
 @app.route('/api/users', methods=['GET'])
 def get_users_list():
     from models import User, UserStats
-    from sqlalchemy import asc
+    from sqlalchemy import asc, desc, func
     
     search_query = request.args.get('q', '')
     page = request.args.get('page', 1, type=int)
     per_page = 100
     
-    query = User.query.options(joinedload(User.stats))
+    query = User.query.outerjoin(UserStats, User.id == UserStats.user_id).options(joinedload(User.stats))
     if search_query:
         search_term = f"%{search_query}%"
         query = query.filter(db.or_(
@@ -1818,7 +1818,16 @@ def get_users_list():
             User.twitter_id.ilike(search_term)
         ))
         
-    query = query.order_by(asc(User.name))
+    gp_medals = func.coalesce(UserStats.gp_1st, 0) + func.coalesce(UserStats.gp_2nd, 0) + func.coalesce(UserStats.gp_3rd, 0)
+    daily_medals = func.coalesce(UserStats.daily_1st, 0) + func.coalesce(UserStats.daily_2nd, 0) + func.coalesce(UserStats.daily_3rd, 0)
+    judge_awards_count = func.coalesce(UserStats.judge_awards, 0)
+
+    query = query.order_by(
+        desc(gp_medals),
+        desc(judge_awards_count),
+        desc(daily_medals),
+        asc(User.name)
+    )
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
     
     users_data = []
