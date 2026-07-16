@@ -43,6 +43,7 @@ class Contest(db.Model):
     image_rule = db.Column(db.String(20), nullable=False, default='optional')
     advancement_numerator = db.Column(db.Integer, nullable=True) # 予選通過率 (分子)
     advancement_denominator = db.Column(db.Integer, nullable=True) # 予選通過率 (分母)
+    judge_award_advancement = db.Column(db.Boolean, nullable=False, default=False)
     parent_contest_id = db.Column(db.Integer, db.ForeignKey('contest.id'), nullable=True)
     is_voting_visible = db.Column(db.Boolean, nullable=False, default=True)
 

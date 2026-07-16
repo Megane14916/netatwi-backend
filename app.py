@@ -23,6 +23,8 @@ import secrets
 import hashlib
 import base64
 from requests.auth import HTTPBasicAuth
+from google.cloud import tasks_v2
+from google.protobuf import timestamp_pb2
 from requests_oauthlib import OAuth2Session
 
 load_dotenv()
@@ -422,6 +424,8 @@ def generate_contest_results(contest_id):
             
         is_advanced = current_rank <= advancement_cutoff if advancement_cutoff > 0 else False
         is_judge_award = post.id in judge_awarded_post_ids
+        if contest.judge_award_advancement and is_judge_award:
+            is_advanced = True
 
         cr = ContestResult(
             contest_id=contest_id,
@@ -557,6 +561,7 @@ def create_contest():
                 start_time=q_start_time_utc,
                 end_time=q_end_time_utc,
                 voting_end_time=q_voting_end_time_utc,
+                judge_award_advancement=data.get('qualifierJudgeAwardAdvancement', False),
                 general_vote_weight=int(data.get('qualifierGeneralVoteWeight', 50)),
                 judge_max_score=int(data.get('qualifierJudgeMaxScore', 10)),
                 judge_password=data.get('qualifierJudgePassword')
@@ -577,12 +582,23 @@ def create_contest():
                 start_time=start_time_utc,
                 end_time=end_time_utc,
                 voting_end_time=voting_end_time_utc,
+                judge_award_advancement=data.get('judgeAwardAdvancement', False),
                 general_vote_weight=general_vote_weight,
                 judge_max_score=judge_max_score,
                 judge_password=judge_password
             )
             db.session.add(final_contest)
             db.session.commit()
+            
+            # Cloud Tasksのスケジュール
+            schedule_contest_task(qualifier_contest.id, 'post_start', qualifier_contest.start_time)
+            schedule_contest_task(qualifier_contest.id, 'voting_start', qualifier_contest.end_time)
+            schedule_contest_task(qualifier_contest.id, 'result_announce', qualifier_contest.voting_end_time)
+            
+            schedule_contest_task(final_contest.id, 'post_start', final_contest.start_time)
+            schedule_contest_task(final_contest.id, 'voting_start', final_contest.end_time)
+            schedule_contest_task(final_contest.id, 'result_announce', final_contest.voting_end_time)
+            
             return jsonify({"message": "Contests created successfully", "id": final_contest.id, "qualifier_id": qualifier_contest.id}), 201
 
         else:
@@ -598,12 +614,18 @@ def create_contest():
                 start_time=start_time_utc,
                 end_time=end_time_utc,
                 voting_end_time=voting_end_time_utc,
+                judge_award_advancement=data.get('judgeAwardAdvancement', False),
                 general_vote_weight=general_vote_weight,
                 judge_max_score=judge_max_score,
                 judge_password=judge_password
             )
             db.session.add(new_contest)
             db.session.commit()
+            
+            schedule_contest_task(new_contest.id, 'post_start', new_contest.start_time)
+            schedule_contest_task(new_contest.id, 'voting_start', new_contest.end_time)
+            schedule_contest_task(new_contest.id, 'result_announce', new_contest.voting_end_time)
+            
             return jsonify({"message": "Contest created successfully", "id": new_contest.id}), 201
     except Exception as e:
         db.session.rollback()
@@ -651,6 +673,7 @@ def get_contests():
                 'id': contest.id, 'name': contest.name, 'hasTheme': contest.has_theme, 'theme': contest.theme, 'hasQualifier': contest.has_qualifier, 
                 'type': contest.type, 'scoringMethod': contest.scoring_method, 'imageRule': contest.image_rule, 'isVotingVisible': contest.is_voting_visible,
                 'advancementNumerator': contest.advancement_numerator, 'advancementDenominator': contest.advancement_denominator, 'parentContestId': contest.parent_contest_id,
+                'judgeAwardAdvancement': contest.judge_award_advancement,
                 'startTime': st.astimezone(JST).isoformat() if st else None, 'endTime': et.astimezone(JST).isoformat() if et else None, 'votingEndTime': vt.astimezone(JST).isoformat() if vt else None, 
                 'generalVoteWeight': contest.general_vote_weight, 'judgeMaxScore': contest.judge_max_score,
                 # 追加フィールド
@@ -703,6 +726,7 @@ def get_contest_details(id):
             'isVotingVisible': contest.is_voting_visible,
             'advancementNumerator': contest.advancement_numerator,
             'advancementDenominator': contest.advancement_denominator,
+            'judgeAwardAdvancement': contest.judge_award_advancement,
             'parentContestId': contest.parent_contest_id,
             'isAdvancedToFinal': is_advanced_to_final,
             'resultCommentTop': contest.result_comment_top,
@@ -1303,6 +1327,7 @@ def get_management_contests():
                 'isVotingVisible': contest.is_voting_visible,
                 'advancementNumerator': contest.advancement_numerator,
                 'advancementDenominator': contest.advancement_denominator,
+                'judgeAwardAdvancement': contest.judge_award_advancement,
                 'resultCommentTop': contest.result_comment_top,
                 'resultCommentBottom': contest.result_comment_bottom
             })
@@ -1348,8 +1373,18 @@ def update_contest(id):
         # コメントの更新
         if 'resultCommentTop' in data: contest.result_comment_top = data['resultCommentTop']
         if 'resultCommentBottom' in data: contest.result_comment_bottom = data['resultCommentBottom']
+        
+        # 審査員賞での決勝進出設定の更新
+        if 'judgeAwardAdvancement' in data: contest.judge_award_advancement = data['judgeAwardAdvancement']
+        if 'qualifierJudgeAwardAdvancement' in data: contest.judge_award_advancement = data['qualifierJudgeAwardAdvancement'] # フロントの名称揺れ対応
 
         db.session.commit()
+        
+        # 時刻が変更された可能性があるのでタスクを再スケジュール
+        schedule_contest_task(contest.id, 'post_start', contest.start_time)
+        schedule_contest_task(contest.id, 'voting_start', contest.end_time)
+        schedule_contest_task(contest.id, 'result_announce', contest.voting_end_time)
+
         return jsonify({"message": "Contest updated successfully"}), 200
     except Exception as e:
         db.session.rollback()
@@ -1701,6 +1736,92 @@ def mark_notifications_read():
     Notification.query.filter_by(user_id=user_id, is_read=False).update({'is_read': True})
     db.session.commit()
     return jsonify({'message': 'All notifications marked as read'})
+
+# --- Cloud Tasks Integration ---
+def schedule_contest_task(contest_id, event_type, schedule_time):
+    project = os.environ.get('GCP_PROJECT_ID')
+    location = os.environ.get('GCP_LOCATION')
+    queue = os.environ.get('GCP_QUEUE_NAME')
+    handler_url = os.environ.get('TASK_HANDLER_URL') or os.environ.get('GCR_URL')
+
+    if not all([project, location, queue, handler_url]):
+        print(f"Skipping task scheduling for {event_type} - GCP configuration missing.")
+        return
+
+    client = tasks_v2.CloudTasksClient()
+    parent = client.queue_path(project, location, queue)
+
+    url = f"{handler_url}/api/tasks/contest/{contest_id}/{event_type}"
+    
+    task = {
+        'http_request': {
+            'http_method': tasks_v2.HttpMethod.POST,
+            'url': url,
+            'headers': {'Content-type': 'application/json'},
+        }
+    }
+
+    # 要件: 各イベントの「10秒後」にタスクを実行する（ギリギリの書き込み遅延等を考慮）
+    schedule_time = schedule_time + timedelta(seconds=10)
+
+    # Ensure schedule time is at least a few seconds in the future
+    now = datetime.now(timezone.utc)
+    if schedule_time < now:
+        schedule_time = now + timedelta(seconds=10)
+
+    timestamp = timestamp_pb2.Timestamp()
+    timestamp.FromDatetime(schedule_time)
+    task['schedule_time'] = timestamp
+
+    try:
+        response = client.create_task(request={'parent': parent, 'task': task})
+        print(f"Created task {response.name} for {event_type} at {schedule_time}")
+    except Exception as e:
+        print(f"Failed to create task for {event_type}: {e}")
+
+@app.route('/api/tasks/contest/<int:id>/<event_type>', methods=['POST'])
+def handle_contest_task(id, event_type):
+    # Security note: In a real app, verify the request comes from Cloud Tasks (e.g. OIDC token)
+    contest = Contest.query.get(id)
+    if not contest:
+        return jsonify({'error': 'Contest not found'}), 404
+
+    now = datetime.now(timezone.utc)
+    changed = False
+
+    if event_type == 'post_start':
+        if contest.start_time and now >= contest.start_time.replace(tzinfo=timezone.utc) and not contest.notified_post_start:
+            print(f"[{contest.id}] Post start notification (Cloud Tasks)")
+            users = User.query.all()
+            for u in users:
+                db.session.add(Notification(user_id=u.id, type='contest_post_start', contest_id=contest.id))
+            contest.notified_post_start = True
+            changed = True
+            
+    elif event_type == 'voting_start':
+        if contest.end_time and now >= contest.end_time.replace(tzinfo=timezone.utc) and not contest.notified_voting_start:
+            print(f"[{contest.id}] Voting start notification (Cloud Tasks)")
+            users = User.query.all()
+            for u in users:
+                db.session.add(Notification(user_id=u.id, type='contest_voting_start', contest_id=contest.id))
+            contest.notified_voting_start = True
+            changed = True
+
+    elif event_type == 'result_announce':
+        if contest.voting_end_time and now >= contest.voting_end_time.replace(tzinfo=timezone.utc) and not contest.notified_result_announce:
+            print(f"[{contest.id}] Result announce notification & calculation (Cloud Tasks)")
+            generate_contest_results(contest.id)
+            users = User.query.all()
+            for u in users:
+                db.session.add(Notification(user_id=u.id, type='contest_result_announce', contest_id=contest.id))
+            contest.notified_result_announce = True
+            changed = True
+
+    if changed:
+        db.session.commit()
+        return jsonify({'message': f'Processed {event_type}'}), 200
+
+    return jsonify({'message': 'Task skipped (time not reached or already processed)'}), 200
 
 @app.cli.command("process-contests")
 def process_contests_command():
