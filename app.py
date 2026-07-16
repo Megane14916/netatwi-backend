@@ -1762,6 +1762,8 @@ def schedule_contest_task(contest_id, event_type, schedule_time):
     }
 
     # 要件: 各イベントの「10秒後」にタスクを実行する（ギリギリの書き込み遅延等を考慮）
+    if schedule_time.tzinfo is None:
+        schedule_time = schedule_time.replace(tzinfo=timezone.utc)
     schedule_time = schedule_time + timedelta(seconds=10)
 
     # Ensure schedule time is at least a few seconds in the future
