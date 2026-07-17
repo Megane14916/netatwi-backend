@@ -641,8 +641,17 @@ def create_contest():
 def index():
     return "ネタツイ大会バックエンド"
 
+# Simple cache for get_contests
+_contests_cache = None
+_contests_cache_time = 0
+
 @app.route('/api/contests')
 def get_contests():
+    global _contests_cache, _contests_cache_time
+    import time
+    if _contests_cache and time.time() - _contests_cache_time < 5:
+        return _contests_cache
+
     try:
         contests = Contest.query.order_by(Contest.start_time.desc()).all()
         now = datetime.now(timezone.utc)
@@ -696,7 +705,10 @@ def get_contests():
             }
             
         upcoming.reverse()
-        return jsonify({'ongoing': ongoing, 'voting': voting, 'upcoming': upcoming, 'closed': closed_data, 'latestResult': latest_result})
+        result = jsonify({'ongoing': ongoing, 'voting': voting, 'upcoming': upcoming, 'closed': closed_data, 'latestResult': latest_result})
+        _contests_cache = result
+        _contests_cache_time = time.time()
+        return result
     except Exception as e: return jsonify({"error": "Failed"}), 500
 
 @app.route('/api/contests/<int:id>')
