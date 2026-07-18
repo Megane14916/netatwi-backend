@@ -960,13 +960,27 @@ def submit_votes(id):
 
         # --- 投票データの保存 ---
         # 1. 点数投票の保存
+        # N+1問題を回避するため、事前に対象のPostをバルク取得
+        post_ids_to_fetch = []
+        for pid_str in votes_to_submit.keys():
+            try:
+                post_ids_to_fetch.append(int(pid_str))
+            except ValueError:
+                pass
+                
+        posts_map = {}
+        if post_ids_to_fetch:
+            fetched_posts = Post.query.filter(Post.id.in_(post_ids_to_fetch)).all()
+            for p in fetched_posts:
+                posts_map[p.id] = p
+
         processed_post_ids = set()
         for pid_str, count_val in votes_to_submit.items():
             try:
                 post_id = int(pid_str)
                 
-                # 自分の投稿への投票を禁止
-                post = db.session.get(Post, post_id)
+                # 自分の投稿への投票を禁止（事前取得したマップから検索）
+                post = posts_map.get(post_id)
                 if not post or post.user_id == user_id:
                     continue
 
