@@ -1306,6 +1306,38 @@ def update_post(contest_id, post_id):
         db.session.rollback()
         print(e)
         return jsonify({"error": "Error"}), 500
+
+@app.route('/api/contests/<int:contest_id>/posts/<int:post_id>', methods=['DELETE'])
+def delete_post(contest_id, post_id):
+    if 'user_id' not in session: return jsonify({"error": "Login required"}), 401
+    user_id = session['user_id']
+    try:
+        post_to_delete = Post.query.filter_by(id=post_id, user_id=user_id, contest_id=contest_id).first()
+        if not post_to_delete: return jsonify({"error": "Not found"}), 404
+        
+        c = Contest.query.get(contest_id)
+        now = datetime.now(timezone.utc)
+        if not (c.start_time.replace(tzinfo=timezone.utc) <= now < c.end_time.replace(tzinfo=timezone.utc)): 
+            return jsonify({"error": "Outside period"}), 403
+            
+        if post_to_delete.images:
+            for url in post_to_delete.images:
+                try: delete_file(url)
+                except: pass
+                
+        Vote.query.filter_by(post_id=post_id).delete()
+        Comment.query.filter_by(post_id=post_id).delete()
+        Notification.query.filter_by(post_id=post_id).delete()
+        Bookmark.query.filter_by(post_id=post_id).delete()
+        ContestResult.query.filter_by(post_id=post_id).delete()
+        
+        db.session.delete(post_to_delete)
+        db.session.commit()
+        return jsonify({"message": "Deleted successfully"}), 200
+    except Exception as e:
+        db.session.rollback()
+        print(e)
+        return jsonify({"error": "Error"}), 500
     
 @app.route('/api/admin/contests/management')
 def get_management_contests():
