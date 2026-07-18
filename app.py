@@ -88,6 +88,7 @@ app.config.update(
     },
     
     SESSION_COOKIE_HTTPONLY=True,
+    PERMANENT_SESSION_LIFETIME=timedelta(days=31),
     MAX_CONTENT_LENGTH=16 * 1024 * 1024,
     
     **session_cookie_config  # 環境に応じた設定を展開
@@ -328,6 +329,7 @@ def twitter_callback():
         db.session.commit()
         
         # アプリケーションセッションにユーザー情報をセット
+        session.permanent = True
         session['user_id'] = user.id
         session['screen_name'] = user.screen_name
         session['name'] = user.name
