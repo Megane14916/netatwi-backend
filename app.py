@@ -917,6 +917,9 @@ def submit_post(id):
 
 @app.route('/api/contests/<int:id>/vote', methods=['POST'])
 def submit_votes(id):
+    import time
+    start_time = time.time()
+    logger.info(f"==> [submit_votes] START for contest {id}")
     if 'user_id' not in session: return jsonify({"error": "Login required"}), 401
     
     user_id = session['user_id']
@@ -997,9 +1000,12 @@ def submit_votes(id):
                 ))
 
         db.session.commit()
+        t_end = time.time()
+        logger.info(f"==> [submit_votes] FINISHED in {t_end - start_time:.4f}s")
         return jsonify({"message": "Voted"}), 200
     except Exception as e:
         db.session.rollback()
+        logger.error(f"==> [submit_votes] ERROR in {time.time() - start_time:.4f}s: {e}")
         print(f"Error: {e}")
         return jsonify({"error": "Error"}), 500
     
