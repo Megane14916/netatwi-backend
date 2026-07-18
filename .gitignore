@@ -15,3 +15,4 @@ static/
 generate_dummy_data.py
 generate_dummy_gp_result.py
 calc_result.py
+patch.py
