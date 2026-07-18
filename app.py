@@ -199,6 +199,13 @@ def log_request_info():
         logger.info(f"X-Forwarded-Proto: {request.headers.get('X-Forwarded-Proto')}")
         logger.info(f"Is Secure (Flask detected): {request.is_secure}")
 
+@app.after_request
+def add_cache_control_headers(response):
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
 @app.route("/api/login/twitter")
 def twitter_login():
     try:
