@@ -44,7 +44,7 @@ class Contest(db.Model):
     advancement_numerator = db.Column(db.Integer, nullable=True) # 予選通過率 (分子)
     advancement_denominator = db.Column(db.Integer, nullable=True) # 予選通過率 (分母)
     judge_award_advancement = db.Column(db.Boolean, nullable=False, default=False)
-    parent_contest_id = db.Column(db.Integer, db.ForeignKey('contest.id'), nullable=True)
+    parent_contest_id = db.Column(db.Integer, db.ForeignKey('contest.id'), index=True, nullable=True)
     is_voting_visible = db.Column(db.Boolean, nullable=False, default=True)
 
     result_comment_top = db.Column(db.Text, nullable=True)
@@ -69,8 +69,8 @@ class Post(db.Model):
 
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    contest_id = db.Column(db.Integer, db.ForeignKey('contest.id'), nullable=False)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    contest_id = db.Column(db.Integer, db.ForeignKey('contest.id'), index=True, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), index=True, nullable=False)
     # Relationships - use back_populates
     user = db.relationship('User', back_populates='posts', lazy=True)
     contest = db.relationship('Contest', back_populates='posts', lazy=True)
@@ -100,9 +100,9 @@ class Vote(db.Model):
     is_judge_vote = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    post_id = db.Column(db.Integer, db.ForeignKey('post.id'), nullable=False)
-    contest_id = db.Column(db.Integer, db.ForeignKey('contest.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), index=True, nullable=False)
+    post_id = db.Column(db.Integer, db.ForeignKey('post.id'), index=True, nullable=False)
+    contest_id = db.Column(db.Integer, db.ForeignKey('contest.id'), index=True, nullable=False)
     # Relationships - use back_populates
     user = db.relationship('User', back_populates='votes', lazy=True)
     post = db.relationship('Post', back_populates='votes', lazy=True)
@@ -116,8 +116,8 @@ class Vote(db.Model):
 
 class Bookmark(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    post_id = db.Column(db.Integer, db.ForeignKey('post.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), index=True, nullable=False)
+    post_id = db.Column(db.Integer, db.ForeignKey('post.id'), index=True, nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
@@ -129,8 +129,8 @@ class Bookmark(db.Model):
 
 class Comment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    post_id = db.Column(db.Integer, db.ForeignKey('post.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), index=True, nullable=False)
+    post_id = db.Column(db.Integer, db.ForeignKey('post.id'), index=True, nullable=False)
     content = db.Column(db.String(140), nullable=False)
     is_judge = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
@@ -143,11 +143,11 @@ class Comment(db.Model):
 
 class Notification(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), index=True, nullable=False)
+    sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), index=True, nullable=True)
     type = db.Column(db.String(50), nullable=False)
-    post_id = db.Column(db.Integer, db.ForeignKey('post.id'), nullable=True)
-    contest_id = db.Column(db.Integer, db.ForeignKey('contest.id'), nullable=True)
+    post_id = db.Column(db.Integer, db.ForeignKey('post.id'), index=True, nullable=True)
+    contest_id = db.Column(db.Integer, db.ForeignKey('contest.id'), index=True, nullable=True)
     is_read = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
@@ -158,9 +158,9 @@ class Notification(db.Model):
 
 class ContestResult(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    contest_id = db.Column(db.Integer, db.ForeignKey('contest.id'), nullable=False)
-    post_id = db.Column(db.Integer, db.ForeignKey('post.id'), nullable=False)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    contest_id = db.Column(db.Integer, db.ForeignKey('contest.id'), index=True, nullable=False)
+    post_id = db.Column(db.Integer, db.ForeignKey('post.id'), index=True, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), index=True, nullable=False)
     score = db.Column(db.Float, nullable=False, default=0.0)
     rank = db.Column(db.Integer, nullable=False)
     is_advanced = db.Column(db.Boolean, nullable=False, default=False)
