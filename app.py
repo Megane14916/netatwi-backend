@@ -943,10 +943,15 @@ def submit_votes(id):
         judge_contest_ids = session.get('judge_for_contest_ids', [])
         is_judge_voting_now = id in judge_contest_ids
         
+        t0 = time.time()
         Vote.query.filter_by(user_id=user_id, contest_id=id).delete()
+        t1 = time.time()
+        logger.info(f"==> [submit_votes] delete took: {t1 - t0:.4f}s")
 
         # 期間チェック
         c = Contest.query.get_or_404(id)
+        t2 = time.time()
+        logger.info(f"==> [submit_votes] get_or_404 took: {t2 - t1:.4f}s")
         now = datetime.now(timezone.utc)
         if not (c.end_time.replace(tzinfo=timezone.utc) <= now < c.voting_end_time.replace(tzinfo=timezone.utc)):
              return jsonify({"error": "Outside period"}), 403
@@ -999,9 +1004,12 @@ def submit_votes(id):
                     is_judge_award=True, judge_comment=judge_award.get('comment')
                 ))
 
+        t3 = time.time()
+        logger.info(f"==> [submit_votes] loop took: {t3 - t2:.4f}s")
         db.session.commit()
-        t_end = time.time()
-        logger.info(f"==> [submit_votes] FINISHED in {t_end - start_time:.4f}s")
+        t4 = time.time()
+        logger.info(f"==> [submit_votes] commit took: {t4 - t3:.4f}s")
+        logger.info(f"==> [submit_votes] FINISHED in {t4 - start_time:.4f}s")
         return jsonify({"message": "Voted"}), 200
     except Exception as e:
         db.session.rollback()
