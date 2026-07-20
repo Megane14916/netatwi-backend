@@ -55,6 +55,11 @@ class Contest(db.Model):
     notified_voting_start = db.Column(db.Boolean, nullable=False, default=False)
     notified_result_announce = db.Column(db.Boolean, nullable=False, default=False)
 
+    # --- キャッシュスタンピード対策用カウンタ ---
+    post_count = db.Column(db.Integer, nullable=False, default=0)
+    total_voters = db.Column(db.Integer, nullable=False, default=0)
+    total_judges = db.Column(db.Integer, nullable=False, default=0)
+
     children = db.relationship('Contest', backref=db.backref('parent', remote_side=[id]), lazy=True)
     # --- ▲▲▲ ここまで ▲▲▲ ---
 

@@ -681,25 +681,17 @@ def get_contests():
         ongoing, voting, upcoming, closed_list, closed_data = [], [], [], [], []
         latest_result = None
 
-        # 投稿者数・投票者数・審査員数を大会ごとに一括で集計 (N+1問題の解消)
-        post_counts = db.session.query(Post.contest_id, func.count(distinct(Post.user_id))).group_by(Post.contest_id).all()
-        post_count_map = {row[0]: row[1] for row in post_counts}
-
-        vote_counts = db.session.query(Vote.contest_id, func.count(distinct(Vote.user_id))).group_by(Vote.contest_id).all()
-        vote_count_map = {row[0]: row[1] for row in vote_counts}
-
-        judge_counts = db.session.query(Vote.contest_id, func.count(distinct(Vote.user_id))).filter(Vote.is_judge_vote == True).group_by(Vote.contest_id).all()
-        judge_count_map = {row[0]: row[1] for row in judge_counts}
+        # キャッシュスタンピード対策により重い集計クエリを削除
 
         for contest in contests:
             st = contest.start_time.replace(tzinfo=timezone.utc) if contest.start_time else None
             et = contest.end_time.replace(tzinfo=timezone.utc) if contest.end_time else None
             vt = contest.voting_end_time.replace(tzinfo=timezone.utc) if contest.voting_end_time else None
             
-            # 事前集計した辞書から取得
-            total_posters = post_count_map.get(contest.id, 0)
-            total_voters = vote_count_map.get(contest.id, 0)
-            total_judges = judge_count_map.get(contest.id, 0)
+            # キャッシュスタンピード対策: モデルのカウンタから取得
+            total_posters = contest.post_count
+            total_voters = contest.total_voters
+            total_judges = contest.total_judges
             
             c_data = { 
                 'id': contest.id, 'name': contest.name, 'hasTheme': contest.has_theme, 'theme': contest.theme, 'hasQualifier': contest.has_qualifier, 
@@ -782,7 +774,7 @@ def get_posts_for_contest(id):
     import time
     start_time = time.time()
     try:
-        Contest.query.get_or_404(id)
+        c = Contest.query.get_or_404(id)
         t1 = time.time()
         logger.info(f"[get_posts] get_or_404: {t1-start_time:.4f}s")
         posts = Post.query.filter_by(contest_id=id).order_by(Post.created_at.desc()).all()
@@ -816,7 +808,7 @@ def get_posts_for_contest(id):
             user_commented_post_ids = set()
             t4 = time.time()
 
-        total_posters = db.session.query(func.count(distinct(Post.user_id))).filter(Post.contest_id == id).scalar() or 0
+        total_posters = c.post_count
         t5 = time.time()
         logger.info(f"[get_posts] total_posters query: {t5-t4:.4f}s")
 
@@ -897,6 +889,9 @@ def submit_post(id):
         new_post = Post(content=content, contest_id=id, user_id=user_id)
         new_post.images = image_urls # JSON化して保存される
 
+        # カウンタのアトミックなインクリメント（レースコンディション対策）
+        Contest.query.filter_by(id=id).update({'post_count': Contest.post_count + 1})
+
         db.session.add(new_post)
         db.session.commit()
         
@@ -944,6 +939,13 @@ def submit_votes(id):
         is_judge_voting_now = id in judge_contest_ids
         
         t0 = time.time()
+        
+        # --- キャッシュスタンピード対策のカウンタ更新用 ---
+        previous_votes = Vote.query.filter_by(user_id=user_id, contest_id=id).all()
+        was_voter = len(previous_votes) > 0
+        was_judge_voter = any(v.is_judge_vote for v in previous_votes)
+        # ----------------------------------------------------
+
         Vote.query.filter_by(user_id=user_id, contest_id=id).delete()
         t1 = time.time()
         logger.info(f"==> [submit_votes] delete took: {t1 - t0:.4f}s")
@@ -1017,6 +1019,21 @@ def submit_votes(id):
                     count=0, is_judge_vote=True,
                     is_judge_award=True, judge_comment=judge_award.get('comment')
                 ))
+
+        # --- キャッシュスタンピード対策のカウンタ更新用 ---
+        is_now_voter = bool(processed_post_ids) or (is_judge_voting_now and judge_award and judge_award.get('postId'))
+        is_now_judge_voter = bool(is_now_voter and is_judge_voting_now)
+
+        if not was_voter and is_now_voter:
+            Contest.query.filter_by(id=id).update({'total_voters': Contest.total_voters + 1})
+        elif was_voter and not is_now_voter:
+            Contest.query.filter(Contest.id == id, Contest.total_voters > 0).update({'total_voters': Contest.total_voters - 1})
+            
+        if not was_judge_voter and is_now_judge_voter:
+            Contest.query.filter_by(id=id).update({'total_judges': Contest.total_judges + 1})
+        elif was_judge_voter and not is_now_judge_voter:
+            Contest.query.filter(Contest.id == id, Contest.total_judges > 0).update({'total_judges': Contest.total_judges - 1})
+        # ----------------------------------------------------
 
         t3 = time.time()
         logger.info(f"==> [submit_votes] loop took: {t3 - t2:.4f}s")
@@ -1105,9 +1122,9 @@ def get_contest_results(id):
             })
         
         results_list.sort(key=lambda x: (x['rank'] is None, x['rank']))
-        total_posters = db.session.query(func.count(distinct(Post.user_id))).filter(Post.contest_id == id).scalar()
-        total_voters = db.session.query(func.count(distinct(Vote.user_id))).filter(Vote.contest_id == id).scalar()
-        total_judges = db.session.query(func.count(distinct(Vote.user_id))).filter(Vote.contest_id == id, Vote.is_judge_vote == True).scalar()
+        total_posters = c.post_count
+        total_voters = c.total_voters
+        total_judges = c.total_judges
 
         return jsonify({
             'contest': { 'id': c.id, 'name': c.name, 'theme': c.theme },
@@ -1396,6 +1413,10 @@ def delete_post(contest_id, post_id):
         ContestResult.query.filter_by(post_id=post_id).delete()
         
         db.session.delete(post_to_delete)
+        
+        # 投稿数カウンタのアトミックなデクリメント
+        Contest.query.filter(Contest.id == contest_id, Contest.post_count > 0).update({'post_count': Contest.post_count - 1})
+        
         db.session.commit()
         return jsonify({"message": "Deleted successfully"}), 200
     except Exception as e:
