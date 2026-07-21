@@ -71,6 +71,7 @@ class Post(db.Model):
     content = db.Column(db.Text, nullable=False)
 
     image_urls = db.Column(db.Text, nullable=True) 
+    comment_count = db.Column(db.Integer, nullable=False, default=0)
 
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
