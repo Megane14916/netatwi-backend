@@ -763,7 +763,10 @@ def get_contest_details(id):
             'parentContestId': contest.parent_contest_id,
             'isAdvancedToFinal': is_advanced_to_final,
             'resultCommentTop': contest.result_comment_top,
-            'resultCommentBottom': contest.result_comment_bottom
+            'resultCommentBottom': contest.result_comment_bottom,
+            'postCount': contest.post_count,
+            'totalVoters': contest.total_voters,
+            'totalJudges': contest.total_judges
         })
     except Exception as e:
         print(f"!!! ERROR at /api/contests/{id}: {e}")
