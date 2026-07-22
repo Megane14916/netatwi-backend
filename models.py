@@ -158,6 +158,8 @@ class Notification(db.Model):
     is_read = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
+    __table_args__ = (db.Index('idx_user_is_read', 'user_id', 'is_read'),)
+
     user = db.relationship('User', foreign_keys=[user_id], backref=db.backref('notifications', lazy=True))
     sender = db.relationship('User', foreign_keys=[sender_id])
     post = db.relationship('Post', backref=db.backref('notifications', lazy=True))

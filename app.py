@@ -1915,6 +1915,15 @@ def get_notifications():
         } if n.contest else None
     } for n in notifications])
 
+@app.route('/api/notifications/unread-count', methods=['GET'])
+def get_unread_notifications_count():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+        
+    user_id = session['user_id']
+    count = Notification.query.filter_by(user_id=user_id, is_read=False).count()
+    return jsonify({'unread_count': count})
+
 @app.route('/api/notifications/read', methods=['POST'])
 def mark_notifications_read():
     if 'user_id' not in session:
