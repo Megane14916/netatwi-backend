@@ -1183,15 +1183,25 @@ def judge_login(id):
 @app.route('/api/profile/<string:screen_name>')
 def get_user_profile_updated(screen_name):
     try:
+        import time
+        perf_start_time = time.time()
+        perf_prev_time = perf_start_time
+        def log_step(step_name):
+            nonlocal perf_prev_time
+            curr = time.time()
+            print(f"PROFILE_PERF_LOG: [{step_name}] took {curr - perf_prev_time:.4f}s (Total: {curr - perf_start_time:.4f}s)")
+            perf_prev_time = curr
+
         viewer_id = session.get('user_id')
         target_user = User.query.filter_by(screen_name=screen_name).first()
+        log_step("target_user query")
         if not target_user: return jsonify({"error": "Not found"}), 404
         user_id = target_user.id
         now = datetime.now(timezone.utc)
         results_cache = {}
 
         # --- 共通整形関数 ---
-        def format_posts(posts_query_result):
+        def format_posts(posts_query_result, label):
             target_posts = []
             target_post_ids = []
             
@@ -1203,6 +1213,8 @@ def get_user_profile_updated(screen_name):
                 target_posts.append(post)
                 target_post_ids.append(post.id)
             
+            log_step(f"format_posts({label}) - 1. filter and id collect")
+
             if not target_posts:
                 return []
 
@@ -1227,6 +1239,8 @@ def get_user_profile_updated(screen_name):
                 if viewer_id and v_user_id == viewer_id:
                     my_votes_map[v_post_id] = v_count
 
+            log_step(f"format_posts({label}) - 2(a) votes_data")
+
             # (b) 審査員賞データ (バッジ用)
             awards_data = db.session.query(Vote.post_id, User.name)\
                 .join(User, Vote.user_id == User.id)\
@@ -1236,13 +1250,19 @@ def get_user_profile_updated(screen_name):
                 if a_post_id not in awards_map: awards_map[a_post_id] = []
                 awards_map[a_post_id].append(f"{u_name}賞")
 
+            log_step(f"format_posts({label}) - 2(b) awards_data")
+
             # (c) ブックマーク数
             bm_counts = dict(db.session.query(Bookmark.post_id, func.count(Bookmark.id)).filter(Bookmark.post_id.in_(target_post_ids)).group_by(Bookmark.post_id).all())
             
+            log_step(f"format_posts({label}) - 2(c) bm_counts")
+
             # (d) 閲覧者のブックマーク状況
             viewer_bms = set()
             if viewer_id:
                 viewer_bms = {p for (p,) in db.session.query(Bookmark.post_id).filter(Bookmark.user_id == viewer_id, Bookmark.post_id.in_(target_post_ids)).all()}
+
+            log_step(f"format_posts({label}) - 2(d) viewer_bms")
 
             # 3. 整形
             formatted = []
@@ -1281,19 +1301,23 @@ def get_user_profile_updated(screen_name):
                     'awards': awards_map.get(post.id, []), # 追加: 審査員賞バッジ
                     'myVotes': my_votes_map.get(post.id, 0) # 追加: 自分の投票数
                 })
+            log_step(f"format_posts({label}) - 3. format")
             return formatted
 
         # ユーザーの投稿
         user_posts_raw = Post.query.filter_by(user_id=user_id).options(joinedload(Post.contest), joinedload(Post.user)).order_by(Post.created_at.desc()).all()
+        log_step("query user_posts_raw")
         
         # ブックマークした投稿
         bookmarks_raw = db.session.query(Post).join(Bookmark, Post.id == Bookmark.post_id).filter(Bookmark.user_id == user_id).options(joinedload(Post.user), joinedload(Post.contest)).order_by(Bookmark.created_at.desc()).all()
+        log_step("query bookmarks_raw")
 
         # いいねした投稿 (一般投票かつcount>0)
         liked_posts_raw = db.session.query(Post).join(Vote, Post.id == Vote.post_id)\
             .filter(Vote.user_id == user_id, Vote.is_judge_vote == False, Vote.count > 0)\
             .options(joinedload(Post.contest), joinedload(Post.user))\
             .order_by(Vote.created_at.desc()).all()
+        log_step("query liked_posts_raw")
 
         return jsonify({
             'user': {
@@ -1302,9 +1326,9 @@ def get_user_profile_updated(screen_name):
                 'name': target_user.name,
                 'profile_image_url': target_user.profile_image_url
             },
-            'posts': format_posts(user_posts_raw),
-            'bookmarks': format_posts(bookmarks_raw),
-            'likes': format_posts(liked_posts_raw)
+            'posts': format_posts(user_posts_raw, 'user_posts'),
+            'bookmarks': format_posts(bookmarks_raw, 'bookmarks'),
+            'likes': format_posts(liked_posts_raw, 'likes')
         })
 
     except Exception as e:
