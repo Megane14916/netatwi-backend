@@ -1200,80 +1200,80 @@ def get_user_profile_updated(screen_name):
         now = datetime.now(timezone.utc)
         results_cache = {}
 
-        # --- 共通整形関数 ---
-        def format_posts(posts_query_result, label):
-            target_posts = []
-            target_post_ids = []
-            
-            # 1. 期間判定とID収集
-            for post in posts_query_result:
-                # 投票終了していない大会の投稿は表示しない（ネタバレ防止）
-                if now < post.contest.voting_end_time.replace(tzinfo=timezone.utc):
-                    continue
-                target_posts.append(post)
-                target_post_ids.append(post.id)
-            
-            log_step(f"format_posts({label}) - 1. filter and id collect")
+        # 1. すべての生の投稿リストを取得
+        user_posts_raw = Post.query.filter_by(user_id=user_id).options(joinedload(Post.contest), joinedload(Post.user)).order_by(Post.created_at.desc()).all()
+        log_step("query user_posts_raw")
+        
+        bookmarks_raw = db.session.query(Post).join(Bookmark, Post.id == Bookmark.post_id).filter(Bookmark.user_id == user_id).options(joinedload(Post.user), joinedload(Post.contest)).order_by(Bookmark.created_at.desc()).all()
+        log_step("query bookmarks_raw")
 
-            if not target_posts:
-                return []
+        liked_posts_raw = db.session.query(Post).join(Vote, Post.id == Vote.post_id)\
+            .filter(Vote.user_id == user_id, Vote.is_judge_vote == False, Vote.count > 0)\
+            .options(joinedload(Post.contest), joinedload(Post.user))\
+            .order_by(Vote.created_at.desc()).all()
+        log_step("query liked_posts_raw")
 
-            # 2. 一括データ取得 (パフォーマンス向上のため、フルORMオブジェクトではなく必要なカラムのみタプルで取得)
-            # (a) 投票データ (投票者リスト構築用)
+        # 2. 有効な(表示可能な)投稿のフィルタリングとID収集
+        def filter_posts(raw_posts):
+            valid = []
+            for p in raw_posts:
+                if now >= p.contest.voting_end_time.replace(tzinfo=timezone.utc):
+                    valid.append(p)
+            return valid
+
+        valid_user_posts = filter_posts(user_posts_raw)
+        valid_bookmarks = filter_posts(bookmarks_raw)
+        valid_likes = filter_posts(liked_posts_raw)
+
+        all_valid_post_ids = list(set([p.id for p in valid_user_posts] + [p.id for p in valid_bookmarks] + [p.id for p in valid_likes]))
+        log_step("filter and collect all post_ids")
+
+        # 3. 必要な情報を一括でDBから取得
+        voters_map = {}
+        my_votes_map = {}
+        awards_map = {}
+        viewer_bms = set()
+
+        if all_valid_post_ids:
+            # (a) 投票データ
             votes_data = db.session.query(Vote.post_id, Vote.count, Vote.is_judge_vote, Vote.user_id, User.screen_name, User.name)\
                 .join(User, Vote.user_id == User.id)\
-                .filter(Vote.post_id.in_(target_post_ids)).all()
-            voters_map = {} # post_id -> [voter_dict, ...]
-            my_votes_map = {} # post_id -> count (閲覧者が投票した数)
-
+                .filter(Vote.post_id.in_(all_valid_post_ids)).all()
             for v_post_id, v_count, v_is_judge_vote, v_user_id, u_screen_name, u_name in votes_data:
                 if v_post_id not in voters_map: voters_map[v_post_id] = []
-                # 審査員の場合は点数も表示したいのでcountを含める
                 voters_map[v_post_id].append({
                     'screen_name': u_screen_name,
                     'name': u_name,
                     'count': v_count,
                     'is_judge': v_is_judge_vote
                 })
-                # 閲覧者の投票状況を確認
                 if viewer_id and v_user_id == viewer_id:
                     my_votes_map[v_post_id] = v_count
+            log_step("bulk fetch votes_data")
 
-            log_step(f"format_posts({label}) - 2(a) votes_data")
-
-            # (b) 審査員賞データ (バッジ用)
+            # (b) 審査員賞データ
             awards_data = db.session.query(Vote.post_id, User.name)\
                 .join(User, Vote.user_id == User.id)\
-                .filter(Vote.post_id.in_(target_post_ids), Vote.is_judge_award == True).all()
-            awards_map = {} # post_id -> ["xxx賞", ...]
+                .filter(Vote.post_id.in_(all_valid_post_ids), Vote.is_judge_award == True).all()
             for a_post_id, u_name in awards_data:
                 if a_post_id not in awards_map: awards_map[a_post_id] = []
                 awards_map[a_post_id].append(f"{u_name}賞")
+            log_step("bulk fetch awards_data")
 
-            log_step(f"format_posts({label}) - 2(b) awards_data")
-
-            # (c) ブックマーク数
-            bm_counts = dict(db.session.query(Bookmark.post_id, func.count(Bookmark.id)).filter(Bookmark.post_id.in_(target_post_ids)).group_by(Bookmark.post_id).all())
-            
-            log_step(f"format_posts({label}) - 2(c) bm_counts")
-
-            # (d) 閲覧者のブックマーク状況
-            viewer_bms = set()
+            # (c) 閲覧者のブックマーク状況
             if viewer_id:
-                viewer_bms = {p for (p,) in db.session.query(Bookmark.post_id).filter(Bookmark.user_id == viewer_id, Bookmark.post_id.in_(target_post_ids)).all()}
+                viewer_bms = {p for (p,) in db.session.query(Bookmark.post_id).filter(Bookmark.user_id == viewer_id, Bookmark.post_id.in_(all_valid_post_ids)).all()}
+            log_step("bulk fetch viewer_bms")
 
-            log_step(f"format_posts({label}) - 2(d) viewer_bms")
-
-            # 3. 整形
+        # 4. フォーマット関数
+        def format_posts_fast(posts_list):
             formatted = []
-            for post in target_posts:
+            for post in posts_list:
                 cid = post.contest_id
-                # ランキング計算 (キャッシュ利用)
                 if cid not in results_cache:
                     results_cache[cid] = get_cached_contest_results(cid)
                 res = results_cache[cid].get(post.id)
                 
-                # 投票者リストのソート (審査員優先)
                 post_voters = voters_map.get(post.id, [])
                 post_voters.sort(key=lambda v: v['is_judge'], reverse=True)
 
@@ -1295,41 +1295,29 @@ def get_user_profile_updated(screen_name):
                     },
                     'rank': res['rank'] if res else None,
                     'score': res['score'] if res else 0,
-                    'bookmarkCount': bm_counts.get(post.id, 0),
+                    'bookmarkCount': post.bookmark_count,
+                    'commentCount': post.comment_count,
                     'isBookmarked': post.id in viewer_bms,
-                    'voters': post_voters,        # 追加: 投票者一覧
-                    'awards': awards_map.get(post.id, []), # 追加: 審査員賞バッジ
-                    'myVotes': my_votes_map.get(post.id, 0) # 追加: 自分の投票数
+                    'voters': post_voters,
+                    'awards': awards_map.get(post.id, []),
+                    'myVotes': my_votes_map.get(post.id, 0)
                 })
-            log_step(f"format_posts({label}) - 3. format")
             return formatted
 
-        # ユーザーの投稿
-        user_posts_raw = Post.query.filter_by(user_id=user_id).options(joinedload(Post.contest), joinedload(Post.user)).order_by(Post.created_at.desc()).all()
-        log_step("query user_posts_raw")
-        
-        # ブックマークした投稿
-        bookmarks_raw = db.session.query(Post).join(Bookmark, Post.id == Bookmark.post_id).filter(Bookmark.user_id == user_id).options(joinedload(Post.user), joinedload(Post.contest)).order_by(Bookmark.created_at.desc()).all()
-        log_step("query bookmarks_raw")
-
-        # いいねした投稿 (一般投票かつcount>0)
-        liked_posts_raw = db.session.query(Post).join(Vote, Post.id == Vote.post_id)\
-            .filter(Vote.user_id == user_id, Vote.is_judge_vote == False, Vote.count > 0)\
-            .options(joinedload(Post.contest), joinedload(Post.user))\
-            .order_by(Vote.created_at.desc()).all()
-        log_step("query liked_posts_raw")
-
-        return jsonify({
+        res_json = {
             'user': {
                 'id': target_user.id,
                 'screen_name': target_user.screen_name,
                 'name': target_user.name,
                 'profile_image_url': target_user.profile_image_url
             },
-            'posts': format_posts(user_posts_raw, 'user_posts'),
-            'bookmarks': format_posts(bookmarks_raw, 'bookmarks'),
-            'likes': format_posts(liked_posts_raw, 'likes')
-        })
+            'posts': format_posts_fast(valid_user_posts),
+            'bookmarks': format_posts_fast(valid_bookmarks),
+            'likes': format_posts_fast(valid_likes)
+        }
+        log_step("format_posts_fast all lists")
+
+        return jsonify(res_json)
 
     except Exception as e:
         print(e)
