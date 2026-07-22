@@ -1096,10 +1096,8 @@ def get_contest_results(id):
             voters_by_post[vote.post_id].append({ 'screen_name': user.screen_name, 'name': user.name, 'count': vote.count, 'is_judge': vote.is_judge_vote })
         
         post_ids = [p.id for p in all_posts]
-        bookmark_counts = dict(db.session.query(Bookmark.post_id, func.count(Bookmark.id)).filter(Bookmark.post_id.in_(post_ids)).group_by(Bookmark.post_id).all())
         user_bookmarks = set()
         if user_id: user_bookmarks = {p for (p,) in db.session.query(Bookmark.post_id).filter(Bookmark.user_id == user_id, Bookmark.post_id.in_(post_ids)).all()}
-        comment_counts = dict(db.session.query(Comment.post_id, func.count(Comment.id)).filter(Comment.post_id.in_(post_ids)).group_by(Comment.post_id).all())
         user_commented_post_ids = set()
         if user_id: user_commented_post_ids = {c.post_id for c in Comment.query.filter_by(user_id=user_id).filter(Comment.post_id.in_(post_ids)).all()}
 
@@ -1117,8 +1115,8 @@ def get_contest_results(id):
                 'score': post_result['score'],
                 'user': { 'screen_name': post.user.screen_name, 'name': post.user.name, 'profile_image_url': post.user.profile_image_url },
                 'voters': post_voters,
-                'bookmarkCount': bookmark_counts.get(post.id, 0),
-                'commentCount': comment_counts.get(post.id, 0),
+                'bookmarkCount': post.bookmark_count,
+                'commentCount': post.comment_count,
                 'hasCommented': post.id in user_commented_post_ids,
                 'isBookmarked': post.id in user_bookmarks,
                 'awards': award_badges.get(post.id, []), # バッジ情報を追加
@@ -1648,17 +1646,21 @@ def toggle_bookmark(post_id):
         existing_bookmark = Bookmark.query.filter_by(user_id=user_id, post_id=post_id).first()
         if existing_bookmark:
             db.session.delete(existing_bookmark)
+            Post.query.filter_by(id=post_id).update({'bookmark_count': Post.bookmark_count - 1})
             is_bookmarked = False
         else:
             new_bookmark = Bookmark(user_id=user_id, post_id=post_id)
             db.session.add(new_bookmark)
+            Post.query.filter_by(id=post_id).update({'bookmark_count': Post.bookmark_count + 1})
             is_bookmarked = True
         db.session.commit()
-        bookmark_count = db.session.query(func.count(Bookmark.id)).filter(Bookmark.post_id == post_id).scalar()
+        
+        db.session.refresh(post)
+        
         return jsonify({
             "message": "ブックマークを更新しました。",
             "isBookmarked": is_bookmarked,
-            "bookmarkCount": bookmark_count if bookmark_count is not None else 0
+            "bookmarkCount": post.bookmark_count
         }), 200
     except Exception as e:
         db.session.rollback()
