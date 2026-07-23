@@ -2103,21 +2103,55 @@ def update_user_stats():
     judge_awards = func.sum(case((ContestResult.is_judge_award == True, 1), else_=0)).label('judge_awards')
 
     results = db.session.query(
-        User.id,
+        User.id, User.name,
         gp_1st, gp_2nd, gp_3rd,
         daily_1st, daily_2nd, daily_3rd,
         judge_awards
     ).outerjoin(ContestResult, User.id == ContestResult.user_id)\
      .outerjoin(Contest, ContestResult.contest_id == Contest.id)\
-     .group_by(User.id).all()
+     .group_by(User.id, User.name).all()
+
+    def sort_key(row):
+        gp_medals = (row.gp_1st or 0) + (row.gp_2nd or 0) + (row.gp_3rd or 0)
+        daily_medals = (row.daily_1st or 0) + (row.daily_2nd or 0) + (row.daily_3rd or 0)
+        judge = row.judge_awards or 0
+        name = row.name or ""
+        return (-gp_medals, -judge, -daily_medals, name)
+
+    results.sort(key=sort_key)
+
+    existing_stats = {s.user_id: s for s in UserStats.query.all()}
+    
+    current_rank = 1
+    tie_count = 0
+    prev_score = None
 
     for row in results:
-        user_id = row[0]
-        stats = UserStats.query.filter_by(user_id=user_id).first()
+        user_id = row.id
+        
+        gp_medals = (row.gp_1st or 0) + (row.gp_2nd or 0) + (row.gp_3rd or 0)
+        daily_medals = (row.daily_1st or 0) + (row.daily_2nd or 0) + (row.daily_3rd or 0)
+        judge = row.judge_awards or 0
+        score = (gp_medals, judge, daily_medals)
+        
+        if prev_score is None:
+            rank = current_rank
+        elif score == prev_score:
+            rank = current_rank
+            tie_count += 1
+        else:
+            current_rank += tie_count + 1
+            rank = current_rank
+            tie_count = 0
+            
+        prev_score = score
+
+        stats = existing_stats.get(user_id)
         if not stats:
             stats = UserStats(user_id=user_id)
             db.session.add(stats)
-        
+            
+        stats.rank = rank
         stats.gp_1st = row.gp_1st or 0
         stats.gp_2nd = row.gp_2nd or 0
         stats.gp_3rd = row.gp_3rd or 0
@@ -2138,7 +2172,7 @@ def get_users_list():
     page = request.args.get('page', 1, type=int)
     per_page = 100
     
-    query = User.query.outerjoin(UserStats, User.id == UserStats.user_id).options(joinedload(User.stats))
+    query = User.query.join(UserStats, User.id == UserStats.user_id).options(joinedload(User.stats))
     if search_query:
         search_term = f"%{search_query}%"
         query = query.filter(db.or_(
@@ -2147,14 +2181,8 @@ def get_users_list():
             User.twitter_id.ilike(search_term)
         ))
         
-    gp_medals = func.coalesce(UserStats.gp_1st, 0) + func.coalesce(UserStats.gp_2nd, 0) + func.coalesce(UserStats.gp_3rd, 0)
-    daily_medals = func.coalesce(UserStats.daily_1st, 0) + func.coalesce(UserStats.daily_2nd, 0) + func.coalesce(UserStats.daily_3rd, 0)
-    judge_awards_count = func.coalesce(UserStats.judge_awards, 0)
-
     query = query.order_by(
-        desc(gp_medals),
-        desc(judge_awards_count),
-        desc(daily_medals),
+        asc(UserStats.rank),
         asc(User.name)
     )
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
