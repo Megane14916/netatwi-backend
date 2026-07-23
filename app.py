@@ -2112,11 +2112,16 @@ def update_user_stats():
      .group_by(User.id, User.name).all()
 
     def sort_key(row):
-        gp_medals = (row.gp_1st or 0) + (row.gp_2nd or 0) + (row.gp_3rd or 0)
-        daily_medals = (row.daily_1st or 0) + (row.daily_2nd or 0) + (row.daily_3rd or 0)
-        judge = row.judge_awards or 0
-        name = row.name or ""
-        return (-gp_medals, -judge, -daily_medals, name)
+        return (
+            -(row.gp_1st or 0),
+            -(row.gp_2nd or 0),
+            -(row.gp_3rd or 0),
+            -(row.judge_awards or 0),
+            -(row.daily_1st or 0),
+            -(row.daily_2nd or 0),
+            -(row.daily_3rd or 0),
+            row.name or ""
+        )
 
     results.sort(key=sort_key)
 
@@ -2129,10 +2134,15 @@ def update_user_stats():
     for row in results:
         user_id = row.id
         
-        gp_medals = (row.gp_1st or 0) + (row.gp_2nd or 0) + (row.gp_3rd or 0)
-        daily_medals = (row.daily_1st or 0) + (row.daily_2nd or 0) + (row.daily_3rd or 0)
-        judge = row.judge_awards or 0
-        score = (gp_medals, judge, daily_medals)
+        score = (
+            row.gp_1st or 0,
+            row.gp_2nd or 0,
+            row.gp_3rd or 0,
+            row.judge_awards or 0,
+            row.daily_1st or 0,
+            row.daily_2nd or 0,
+            row.daily_3rd or 0
+        )
         
         if prev_score is None:
             rank = current_rank
