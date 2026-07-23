@@ -424,7 +424,8 @@ def generate_contest_results(contest_id):
     current_rank = 1
     last_score = -1
     skip = 0
-    total_participants = Post.query.filter_by(contest_id=contest_id).count()
+    ranked_posts = ranked_posts_query.all()
+    total_participants = len(ranked_posts)
     advancement_cutoff = 0
     if contest.advancement_numerator is not None and contest.advancement_denominator:
         advancement_cutoff = (total_participants * contest.advancement_numerator) // contest.advancement_denominator
@@ -433,7 +434,8 @@ def generate_contest_results(contest_id):
     judge_awards_query = db.session.query(Vote.post_id).filter(Vote.contest_id == contest_id, Vote.is_judge_award == True).all()
     judge_awarded_post_ids = {row[0] for row in judge_awards_query}
 
-    for idx, (post, total_score) in enumerate(ranked_posts_query.all()):
+    results_to_insert = []
+    for idx, (post, total_score) in enumerate(ranked_posts):
         current_score_val = round(total_score, 2) if total_score is not None else 0
         if idx == 0:
             last_score = current_score_val
@@ -459,7 +461,9 @@ def generate_contest_results(contest_id):
             is_advanced=is_advanced,
             is_judge_award=is_judge_award
         )
-        db.session.add(cr)
+        results_to_insert.append(cr)
+        
+    db.session.bulk_save_objects(results_to_insert)
 
     try:
         db.session.commit()
@@ -1935,7 +1939,10 @@ def mark_notifications_read():
     return jsonify({'message': 'All notifications marked as read'})
 
 # --- Cloud Tasks Integration ---
+_cloud_tasks_client = None
+
 def schedule_contest_task(contest_id, event_type, schedule_time):
+    global _cloud_tasks_client
     project = os.environ.get('GCP_PROJECT_ID')
     location = os.environ.get('GCP_LOCATION')
     queue = os.environ.get('GCP_QUEUE_NAME')
@@ -1945,7 +1952,9 @@ def schedule_contest_task(contest_id, event_type, schedule_time):
         print(f"Skipping task scheduling for {event_type} - GCP configuration missing.")
         return
 
-    client = tasks_v2.CloudTasksClient()
+    if _cloud_tasks_client is None:
+        _cloud_tasks_client = tasks_v2.CloudTasksClient()
+    client = _cloud_tasks_client
     parent = client.queue_path(project, location, queue)
 
     url = f"{handler_url}/api/tasks/contest/{contest_id}/{event_type}"
@@ -1991,18 +2000,18 @@ def handle_contest_task(id, event_type):
     if event_type == 'post_start':
         if contest.start_time and now >= contest.start_time.replace(tzinfo=timezone.utc) and not contest.notified_post_start:
             print(f"[{contest.id}] Post start notification (Cloud Tasks)")
-            users = User.query.all()
-            for u in users:
-                db.session.add(Notification(user_id=u.id, type='contest_post_start', contest_id=contest.id))
+            user_ids = db.session.query(User.id).all()
+            notifications = [{'user_id': uid[0], 'type': 'contest_post_start', 'contest_id': contest.id} for uid in user_ids]
+            db.session.bulk_insert_mappings(Notification, notifications)
             contest.notified_post_start = True
             changed = True
             
     elif event_type == 'voting_start':
         if contest.end_time and now >= contest.end_time.replace(tzinfo=timezone.utc) and not contest.notified_voting_start:
             print(f"[{contest.id}] Voting start notification (Cloud Tasks)")
-            users = User.query.all()
-            for u in users:
-                db.session.add(Notification(user_id=u.id, type='contest_voting_start', contest_id=contest.id))
+            user_ids = db.session.query(User.id).all()
+            notifications = [{'user_id': uid[0], 'type': 'contest_voting_start', 'contest_id': contest.id} for uid in user_ids]
+            db.session.bulk_insert_mappings(Notification, notifications)
             contest.notified_voting_start = True
             changed = True
 
@@ -2010,9 +2019,9 @@ def handle_contest_task(id, event_type):
         if contest.voting_end_time and now >= contest.voting_end_time.replace(tzinfo=timezone.utc) and not contest.notified_result_announce:
             print(f"[{contest.id}] Result announce notification & calculation (Cloud Tasks)")
             generate_contest_results(contest.id)
-            users = User.query.all()
-            for u in users:
-                db.session.add(Notification(user_id=u.id, type='contest_result_announce', contest_id=contest.id))
+            user_ids = db.session.query(User.id).all()
+            notifications = [{'user_id': uid[0], 'type': 'contest_result_announce', 'contest_id': contest.id} for uid in user_ids]
+            db.session.bulk_insert_mappings(Notification, notifications)
             contest.notified_result_announce = True
             changed = True
 
