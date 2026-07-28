@@ -343,6 +343,8 @@ def twitter_callback():
             )
             db.session.add(user)
         else:
+            if user.deleted_at:
+                return redirect(f"{frontend_url}?login_error=account_deleted")
             user.screen_name = screen_name
             user.name = name
             user.profile_image_url = profile_image_url
@@ -533,6 +535,21 @@ def logout():
     session.clear()
     return jsonify({'message': 'Logged out successfully'})
 
+@app.route('/api/users/me', methods=['DELETE'])
+def withdraw_user():
+    if 'user_id' not in session:
+        return jsonify({"error": "Login required"}), 401
+    
+    user_id = session['user_id']
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+        
+    user.deleted_at = datetime.now(timezone.utc)
+    db.session.commit()
+    
+    session.clear()
+    return jsonify({"message": "退会処理が完了しました"})
 
 
 
@@ -1199,7 +1216,7 @@ def get_user_profile_updated(screen_name):
         viewer_id = session.get('user_id')
         target_user = User.query.filter_by(screen_name=screen_name).first()
         log_step("target_user query")
-        if not target_user: return jsonify({"error": "Not found"}), 404
+        if not target_user or target_user.deleted_at: return jsonify({"error": "Not found"}), 404
         user_id = target_user.id
         now = datetime.now(timezone.utc)
         results_cache = {}
@@ -2183,6 +2200,7 @@ def get_users_list():
     per_page = 100
     
     query = User.query.join(UserStats, User.id == UserStats.user_id).options(joinedload(User.stats))
+    query = query.filter(User.deleted_at.is_(None))
     if search_query:
         search_term = f"%{search_query}%"
         query = query.filter(db.or_(
