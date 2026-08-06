@@ -243,6 +243,9 @@ def add_cache_control_headers(response):
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
+    # Cookieごとにレスポンスを分けさせる。CDN/リバースプロキシがCookieを無視して
+    # URLだけでキャッシュし、別ユーザーに他人のレスポンスを返す事故を防ぐ。
+    response.headers["Vary"] = "Cookie"
     return response
 
 
@@ -831,7 +834,7 @@ def get_contests():
     import time
 
     if _contests_cache and time.time() - _contests_cache_time < 5:
-        return _contests_cache
+        return jsonify(_contests_cache)
 
     try:
         contests = Contest.query.order_by(Contest.start_time.desc()).all()
@@ -911,18 +914,17 @@ def get_contests():
             }
 
         upcoming.reverse()
-        result = jsonify(
-            {
-                "ongoing": ongoing,
-                "voting": voting,
-                "upcoming": upcoming,
-                "closed": closed_data,
-                "latestResult": latest_result,
-            }
-        )
-        _contests_cache = result
+        payload = {
+            "ongoing": ongoing,
+            "voting": voting,
+            "upcoming": upcoming,
+            "closed": closed_data,
+            "latestResult": latest_result,
+        }
+        # Response オブジェカトではなく dict で保持する（ミリセッンスレベルでの共有による不具合を回避）
+        _contests_cache = payload
         _contests_cache_time = time.time()
-        return result
+        return jsonify(payload)
     except Exception as e:
         return jsonify({"error": "Failed"}), 500
 
