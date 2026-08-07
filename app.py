@@ -12,6 +12,8 @@ import boto3  # R2用
 from dotenv import load_dotenv
 from flask import Flask, jsonify, redirect, request, session, url_for
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from models import (
@@ -86,6 +88,13 @@ if not frontend_url:
     raise ValueError("FATAL_ERROR: FRONTEND_URL environment variable is not set.")
 
 app = Flask(__name__)
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://"
+)
 
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=0, x_prefix=0)
 
@@ -1496,6 +1505,7 @@ def get_contest_results(id):
 
 
 @app.route("/api/contests/<int:id>/judge/login", methods=["POST"])
+@limiter.limit("5 per minute")
 def judge_login(id):
     if "user_id" not in session:
         return jsonify({"error": "ログインが必要です。"}), 401
