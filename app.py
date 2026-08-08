@@ -2435,16 +2435,16 @@ def add_comment(post_id):
     data = request.get_json()
     raw_content = data.get("content", "")
 
-    if not raw_content.strip() or len(raw_content) > 140:
+    judge_contests = session.get("judge_for_contest_ids", [])
+    is_judge = post.contest_id in judge_contests
+
+    if not raw_content.strip() or (len(raw_content) > 140 and not is_judge):
         return jsonify({"error": "Comment must be between 1 and 140 characters"}), 400
     content = raw_content
 
     existing_comment = Comment.query.filter_by(post_id=post_id, user_id=user_id).first()
     if existing_comment:
         return jsonify({"error": "You have already commented on this post"}), 409
-
-    judge_contests = session.get("judge_for_contest_ids", [])
-    is_judge = post.contest_id in judge_contests
 
     new_comment = Comment(
         user_id=user_id, post_id=post_id, content=content, is_judge=is_judge
@@ -2497,7 +2497,7 @@ def modify_comment(comment_id):
 
     data = request.get_json()
     raw_content = data.get("content", "")
-    if not raw_content.strip() or len(raw_content) > 140:
+    if not raw_content.strip() or (len(raw_content) > 140 and not comment.is_judge):
         return jsonify({"error": "Invalid content length"}), 400
 
     comment.content = raw_content
