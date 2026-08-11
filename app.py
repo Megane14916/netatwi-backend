@@ -284,10 +284,13 @@ def twitter_login():
         authorization_url = authorization_url.replace("+", "%20")
 
         # セッションに検証用の値を保存
-        # 既存のセッション（古い user_id 等）を必ず消してから書き込む
+        # 審査員認証情報を引き継いでからセッションをクリアする
+        judge_ids = session.get("judge_for_contest_ids", [])
         session.clear()
         session["oauth_state"] = state
         session["code_verifier"] = code_verifier
+        if judge_ids:
+            session["judge_for_contest_ids"] = judge_ids
         session.modified = True
 
         logger.info(f"Saved to session - State: {state}")
@@ -1200,20 +1203,10 @@ def submit_votes(id):
 
         t0 = time.time()
 
-        # --- キャッシュスタンピード対策のカウンタ更新用 ---
-        previous_votes = Vote.query.filter_by(user_id=user_id, contest_id=id).all()
-        was_voter = len(previous_votes) > 0
-        was_judge_voter = any(v.is_judge_vote for v in previous_votes)
-        # ----------------------------------------------------
-
-        Vote.query.filter_by(user_id=user_id, contest_id=id).delete()
-        t1 = time.time()
-        logger.info(f"==> [submit_votes] delete took: {t1 - t0:.4f}s")
-
-        # 期間チェック
+        # 期間チェック（DELETEより前に行い、範囲外なら何も変更せず返す）
         c = Contest.query.get_or_404(id)
-        t2 = time.time()
-        logger.info(f"==> [submit_votes] get_or_404 took: {t2 - t1:.4f}s")
+        t1 = time.time()
+        logger.info(f"==> [submit_votes] get_or_404 took: {t1 - t0:.4f}s")
         now = datetime.now(timezone.utc)
         if not (
             c.end_time.replace(tzinfo=timezone.utc)
@@ -1221,6 +1214,16 @@ def submit_votes(id):
             < c.voting_end_time.replace(tzinfo=timezone.utc)
         ):
             return jsonify({"error": "Outside period"}), 403
+
+        # --- キャッシュスタンピード対策のカウンタ更新用 ---
+        previous_votes = Vote.query.filter_by(user_id=user_id, contest_id=id).all()
+        was_voter = len(previous_votes) > 0
+        was_judge_voter = any(v.is_judge_vote for v in previous_votes)
+        # ----------------------------------------------------
+
+        Vote.query.filter_by(user_id=user_id, contest_id=id).delete()
+        t2 = time.time()
+        logger.info(f"==> [submit_votes] delete took: {t2 - t1:.4f}s")
 
         max_score = c.judge_max_score if is_judge else 1
 
