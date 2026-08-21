@@ -1061,7 +1061,7 @@ def get_posts_for_contest(id):
                     .astimezone(JST)
                     .isoformat(),
                     "user_id": post.user_id,
-                    "myVotes": user_votes.get(post.id, 0),
+                    "myVotes": user_votes.get(post.id, None),
                     "images": post.images,
                     "myJudgeAward": my_vote.get("is_judge_award", False),
                     "myJudgeComment": my_vote.get("judge_comment", None),
@@ -1273,7 +1273,7 @@ def submit_votes(id):
                     comment = judge_award.get("comment")
 
                 # 投票数が正、または審査員賞であれば保存
-                if count > 0 or is_award:
+                if count > 0 or is_award or (is_judge_voting_now and count == 0):
                     db.session.add(
                         Vote(
                             user_id=user_id,
@@ -1746,7 +1746,7 @@ def get_user_profile_updated(screen_name):
                         "isBookmarked": post.id in viewer_bms,
                         "voters": post_voters,
                         "awards": awards_map.get(post.id, []),
-                        "myVotes": my_votes_map.get(post.id, 0),
+                        "myVotes": my_votes_map.get(post.id, None),
                     }
                 )
             return formatted
@@ -1857,7 +1857,7 @@ def update_post(contest_id, post_id):
                 .astimezone(JST)
                 .isoformat(),
                 "user_id": post_to_edit.user_id,
-                "myVotes": 0,
+                "myVotes": None,
             }
         ), 200
     except Exception as e:
