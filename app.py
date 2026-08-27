@@ -127,7 +127,9 @@ app.config.update(
     },
     SESSION_COOKIE_HTTPONLY=True,
     PERMANENT_SESSION_LIFETIME=timedelta(days=31),
-    MAX_CONTENT_LENGTH=16 * 1024 * 1024,
+    # フロントエンドの画像合計上限 (16 MiB) に multipart の
+    # オーバーヘッド分の余裕を持たせる。
+    MAX_CONTENT_LENGTH=17 * 1024 * 1024,
     **session_cookie_config,  # 環境に応じた設定を展開
 )
 
@@ -139,6 +141,21 @@ CORS(app, supports_credentials=True, origins=[frontend_url])
 # ---
 db.init_app(app)
 migrate = Migrate(app, db)
+
+
+@app.errorhandler(413)
+def request_entity_too_large(_error):
+    """容量超過をフロントエンドが解釈できる JSON で返す。"""
+    return (
+        jsonify(
+            {
+                "error": "画像の合計サイズが上限を超えています（最大16 MiB）",
+                "code": "PAYLOAD_TOO_LARGE",
+                "maxBytes": 16 * 1024 * 1024,
+            }
+        ),
+        413,
+    )
 
 UPLOAD_FOLDER = "static/uploads"
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
