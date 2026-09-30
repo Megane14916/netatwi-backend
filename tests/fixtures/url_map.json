@@ -1,0 +1,257 @@
+[
+  {
+    "endpoint": "index",
+    "path": "/",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "endpoint": "create_contest",
+    "path": "/api/admin/contests",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "endpoint": "delete_contest",
+    "path": "/api/admin/contests/<int:id>",
+    "methods": [
+      "DELETE"
+    ]
+  },
+  {
+    "endpoint": "update_contest",
+    "path": "/api/admin/contests/<int:id>",
+    "methods": [
+      "PUT"
+    ]
+  },
+  {
+    "endpoint": "get_management_contests",
+    "path": "/api/admin/contests/management",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "endpoint": "get_admin_news",
+    "path": "/api/admin/news",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "endpoint": "add_news",
+    "path": "/api/admin/news",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "endpoint": "delete_news",
+    "path": "/api/admin/news/<int:id>",
+    "methods": [
+      "DELETE"
+    ]
+  },
+  {
+    "endpoint": "twitter_callback",
+    "path": "/api/callback/twitter",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "endpoint": "get_multiple_comments",
+    "path": "/api/comments",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "endpoint": "modify_comment",
+    "path": "/api/comments/<int:comment_id>",
+    "methods": [
+      "DELETE",
+      "PUT"
+    ]
+  },
+  {
+    "endpoint": "get_contests",
+    "path": "/api/contests",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "endpoint": "delete_post",
+    "path": "/api/contests/<int:contest_id>/posts/<int:post_id>",
+    "methods": [
+      "DELETE"
+    ]
+  },
+  {
+    "endpoint": "update_post",
+    "path": "/api/contests/<int:contest_id>/posts/<int:post_id>",
+    "methods": [
+      "PUT"
+    ]
+  },
+  {
+    "endpoint": "get_contest_details",
+    "path": "/api/contests/<int:id>",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "endpoint": "judge_login",
+    "path": "/api/contests/<int:id>/judge/login",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "endpoint": "get_posts_for_contest",
+    "path": "/api/contests/<int:id>/posts",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "endpoint": "submit_post",
+    "path": "/api/contests/<int:id>/posts",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "endpoint": "get_contest_results",
+    "path": "/api/contests/<int:id>/results",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "endpoint": "submit_votes",
+    "path": "/api/contests/<int:id>/vote",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "endpoint": "twitter_login",
+    "path": "/api/login/twitter",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "endpoint": "logout",
+    "path": "/api/logout",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "endpoint": "get_current_user",
+    "path": "/api/me",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "endpoint": "get_news",
+    "path": "/api/news",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "endpoint": "get_notifications",
+    "path": "/api/notifications",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "endpoint": "mark_notifications_read",
+    "path": "/api/notifications/read",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "endpoint": "get_unread_notifications_count",
+    "path": "/api/notifications/unread-count",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "endpoint": "set_bookmark",
+    "path": "/api/posts/<int:post_id>/bookmark",
+    "methods": [
+      "DELETE",
+      "PUT"
+    ]
+  },
+  {
+    "endpoint": "get_comments",
+    "path": "/api/posts/<int:post_id>/comments",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "endpoint": "add_comment",
+    "path": "/api/posts/<int:post_id>/comments",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "endpoint": "set_like",
+    "path": "/api/posts/<int:post_id>/like",
+    "methods": [
+      "DELETE",
+      "PUT"
+    ]
+  },
+  {
+    "endpoint": "get_user_profile_updated",
+    "path": "/api/profile/<string:screen_name>",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "endpoint": "handle_contest_task",
+    "path": "/api/tasks/contest/<int:id>/<event_type>",
+    "methods": [
+      "POST"
+    ]
+  },
+  {
+    "endpoint": "get_users_list",
+    "path": "/api/users",
+    "methods": [
+      "GET"
+    ]
+  },
+  {
+    "endpoint": "withdraw_user",
+    "path": "/api/users/me",
+    "methods": [
+      "DELETE"
+    ]
+  },
+  {
+    "endpoint": "static",
+    "path": "/static/<path:filename>",
+    "methods": [
+      "GET"
+    ]
+  }
+]
