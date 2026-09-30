@@ -1,0 +1,492 @@
+{
+  "Bookmark": {
+    "post": {
+      "target": "Post",
+      "back_populates": "bookmarks",
+      "uselist": false,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "post_id"
+      ]
+    },
+    "user": {
+      "target": "User",
+      "back_populates": "bookmarks",
+      "uselist": false,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "user_id"
+      ]
+    }
+  },
+  "Comment": {
+    "post": {
+      "target": "Post",
+      "back_populates": "comments",
+      "uselist": false,
+      "lazy": "select",
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "post_id"
+      ]
+    },
+    "user": {
+      "target": "User",
+      "back_populates": "comments",
+      "uselist": false,
+      "lazy": "select",
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "user_id"
+      ]
+    }
+  },
+  "Contest": {
+    "children": {
+      "target": "Contest",
+      "back_populates": "parent",
+      "uselist": true,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "id"
+      ]
+    },
+    "notifications": {
+      "target": "Notification",
+      "back_populates": "contest",
+      "uselist": true,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "id"
+      ]
+    },
+    "parent": {
+      "target": "Contest",
+      "back_populates": "children",
+      "uselist": false,
+      "lazy": "select",
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "parent_contest_id"
+      ]
+    },
+    "posts": {
+      "target": "Post",
+      "back_populates": "contest",
+      "uselist": true,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "id"
+      ]
+    },
+    "results": {
+      "target": "ContestResult",
+      "back_populates": "contest",
+      "uselist": true,
+      "lazy": true,
+      "cascade": [
+        "delete",
+        "delete-orphan",
+        "expunge",
+        "merge",
+        "refresh-expire",
+        "save-update"
+      ],
+      "local_columns": [
+        "id"
+      ]
+    },
+    "votes": {
+      "target": "Vote",
+      "back_populates": "contest",
+      "uselist": true,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "id"
+      ]
+    }
+  },
+  "ContestResult": {
+    "contest": {
+      "target": "Contest",
+      "back_populates": "results",
+      "uselist": false,
+      "lazy": "select",
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "contest_id"
+      ]
+    },
+    "post": {
+      "target": "Post",
+      "back_populates": "results",
+      "uselist": false,
+      "lazy": "select",
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "post_id"
+      ]
+    },
+    "user": {
+      "target": "User",
+      "back_populates": "results",
+      "uselist": false,
+      "lazy": "select",
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "user_id"
+      ]
+    }
+  },
+  "News": {},
+  "Notification": {
+    "contest": {
+      "target": "Contest",
+      "back_populates": "notifications",
+      "uselist": false,
+      "lazy": "select",
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "contest_id"
+      ]
+    },
+    "post": {
+      "target": "Post",
+      "back_populates": "notifications",
+      "uselist": false,
+      "lazy": "select",
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "post_id"
+      ]
+    },
+    "sender": {
+      "target": "User",
+      "back_populates": null,
+      "uselist": false,
+      "lazy": "select",
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "sender_id"
+      ]
+    },
+    "user": {
+      "target": "User",
+      "back_populates": "notifications",
+      "uselist": false,
+      "lazy": "select",
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "user_id"
+      ]
+    }
+  },
+  "Post": {
+    "bookmarks": {
+      "target": "Bookmark",
+      "back_populates": "post",
+      "uselist": true,
+      "lazy": true,
+      "cascade": [
+        "delete",
+        "delete-orphan",
+        "expunge",
+        "merge",
+        "refresh-expire",
+        "save-update"
+      ],
+      "local_columns": [
+        "id"
+      ]
+    },
+    "comments": {
+      "target": "Comment",
+      "back_populates": "post",
+      "uselist": true,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "id"
+      ]
+    },
+    "contest": {
+      "target": "Contest",
+      "back_populates": "posts",
+      "uselist": false,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "contest_id"
+      ]
+    },
+    "notifications": {
+      "target": "Notification",
+      "back_populates": "post",
+      "uselist": true,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "id"
+      ]
+    },
+    "results": {
+      "target": "ContestResult",
+      "back_populates": "post",
+      "uselist": true,
+      "lazy": true,
+      "cascade": [
+        "delete",
+        "delete-orphan",
+        "expunge",
+        "merge",
+        "refresh-expire",
+        "save-update"
+      ],
+      "local_columns": [
+        "id"
+      ]
+    },
+    "user": {
+      "target": "User",
+      "back_populates": "posts",
+      "uselist": false,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "user_id"
+      ]
+    },
+    "votes": {
+      "target": "Vote",
+      "back_populates": "post",
+      "uselist": true,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "id"
+      ]
+    }
+  },
+  "User": {
+    "bookmarks": {
+      "target": "Bookmark",
+      "back_populates": "user",
+      "uselist": true,
+      "lazy": true,
+      "cascade": [
+        "delete",
+        "delete-orphan",
+        "expunge",
+        "merge",
+        "refresh-expire",
+        "save-update"
+      ],
+      "local_columns": [
+        "id"
+      ]
+    },
+    "comments": {
+      "target": "Comment",
+      "back_populates": "user",
+      "uselist": true,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "id"
+      ]
+    },
+    "notifications": {
+      "target": "Notification",
+      "back_populates": "user",
+      "uselist": true,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "id"
+      ]
+    },
+    "posts": {
+      "target": "Post",
+      "back_populates": "user",
+      "uselist": true,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "id"
+      ]
+    },
+    "results": {
+      "target": "ContestResult",
+      "back_populates": "user",
+      "uselist": true,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "id"
+      ]
+    },
+    "stats": {
+      "target": "UserStats",
+      "back_populates": "user",
+      "uselist": false,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "id"
+      ]
+    },
+    "votes": {
+      "target": "Vote",
+      "back_populates": "user",
+      "uselist": true,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "id"
+      ]
+    }
+  },
+  "UserStats": {
+    "user": {
+      "target": "User",
+      "back_populates": "stats",
+      "uselist": false,
+      "lazy": "select",
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "user_id"
+      ]
+    }
+  },
+  "Vote": {
+    "contest": {
+      "target": "Contest",
+      "back_populates": "votes",
+      "uselist": false,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "contest_id"
+      ]
+    },
+    "post": {
+      "target": "Post",
+      "back_populates": "votes",
+      "uselist": false,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "post_id"
+      ]
+    },
+    "user": {
+      "target": "User",
+      "back_populates": "votes",
+      "uselist": false,
+      "lazy": true,
+      "cascade": [
+        "merge",
+        "save-update"
+      ],
+      "local_columns": [
+        "user_id"
+      ]
+    }
+  }
+}
