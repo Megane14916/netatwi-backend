@@ -32,9 +32,13 @@ os.environ.update(
 import app as app_module  # noqa: E402
 from blueprints import admin as admin_routes  # noqa: E402
 from blueprints import auth as auth_routes  # noqa: E402
+from blueprints import comments as comment_routes  # noqa: E402
 from blueprints import contests as contest_routes  # noqa: E402
+from blueprints import interactions as interaction_routes  # noqa: E402
 from blueprints import posts as post_routes  # noqa: E402
 from blueprints import profile as profile_routes  # noqa: E402
+from blueprints import results as result_routes  # noqa: E402
+from blueprints import voting as voting_routes  # noqa: E402
 from app import db  # noqa: E402
 from models import Contest, User  # noqa: E402
 
@@ -141,6 +145,10 @@ def fixed_time(monkeypatch):
         monkeypatch.setattr(contest_routes, "datetime", FixedDateTime)
         monkeypatch.setattr(post_routes, "datetime", FixedDateTime)
         monkeypatch.setattr(profile_routes, "datetime", FixedDateTime)
+        monkeypatch.setattr(voting_routes, "datetime", FixedDateTime)
+        monkeypatch.setattr(result_routes, "datetime", FixedDateTime)
+        monkeypatch.setattr(interaction_routes, "datetime", FixedDateTime)
+        monkeypatch.setattr(comment_routes, "datetime", FixedDateTime)
 
     return freeze
 
