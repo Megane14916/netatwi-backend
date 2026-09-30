@@ -5,6 +5,10 @@ from importlib import import_module
 from pathlib import Path
 
 import models
+from alembic.autogenerate import compare_metadata
+from alembic.migration import MigrationContext
+from app import create_app
+from flask_migrate import upgrade
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.schema import CreateIndex, CreateTable
 
@@ -103,3 +107,23 @@ def test_relationships_match_pre_refactor_snapshot():
         (FIXTURES / "model_relationships.json").read_text(encoding="utf-8")
     )
     assert relationship_contract() == expected
+
+
+def test_alembic_has_no_new_differences_after_migration_upgrade():
+    """The existing Comment.content VARCHAR-to-Text drift predates this split."""
+    flask_app = create_app(
+        {"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:"}
+    )
+    with flask_app.app_context():
+        upgrade()
+        with models.db.engine.connect() as connection:
+            differences = compare_metadata(
+                MigrationContext.configure(connection), models.db.metadata
+            )
+
+    assert len(differences) == 1
+    assert len(differences[0]) == 1
+    difference = differences[0][0]
+    assert difference[:4] == ("modify_type", None, "comment", "content")
+    assert str(difference[5]) == "VARCHAR(140)"
+    assert str(difference[6]) == "TEXT"
