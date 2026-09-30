@@ -1,10 +1,16 @@
 """Call helpers retained in app.py while route groups are being moved."""
 
 from flask import current_app
+from werkzeug.local import LocalProxy
 
 
 def _call(name, *args):
     return current_app.extensions["legacy_route_helpers"][name](*args)
+
+
+# Resolve the original logger at request time, including when app.py runs as
+# __main__ or an integration replaces app.logger.
+route_logger = LocalProxy(lambda: _call("get_route_logger"))
 
 
 def allowed_file(filename):

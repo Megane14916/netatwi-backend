@@ -51,7 +51,10 @@ EXPECTED_ROUTES = {
 
 
 def test_route_contract(app):
-    assert {"auth", "admin", "news", "contests", "posts", "profile"} <= set(
+    assert {
+        "auth", "admin", "news", "contests", "posts", "profile",
+        "voting", "results", "interactions", "comments", "notifications", "users",
+    } <= set(
         app.blueprints
     )
     actual = {
@@ -62,3 +65,20 @@ def test_route_contract(app):
 
     assert len(actual) == 35
     assert actual == EXPECTED_ROUTES
+
+
+def test_issue_10_handlers_are_registered_from_blueprints(app):
+    from app import app as production_app
+
+    groups = {
+        "voting": ["submit_votes"],
+        "results": ["get_contest_results"],
+        "interactions": ["set_bookmark", "set_like"],
+        "comments": ["get_comments", "get_multiple_comments", "add_comment", "modify_comment"],
+        "notifications": ["get_notifications", "get_unread_notifications_count", "mark_notifications_read"],
+        "users": ["get_users_list"],
+    }
+    for application in (production_app, app):
+        for module, endpoints in groups.items():
+            for endpoint in endpoints:
+                assert application.view_functions[endpoint].__module__ == f"blueprints.{module}"
