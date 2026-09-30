@@ -31,3 +31,7 @@ def delete_file(file_url):
 
 def get_cached_contest_results(contest_id):
     return _call("get_cached_contest_results", contest_id)
+
+
+def generate_contest_results(contest_id):
+    return _call("generate_contest_results", contest_id)

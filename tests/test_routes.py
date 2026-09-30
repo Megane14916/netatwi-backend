@@ -54,6 +54,7 @@ def test_route_contract(app):
     assert {
         "auth", "admin", "news", "contests", "posts", "profile",
         "voting", "results", "interactions", "comments", "notifications", "users",
+        "tasks",
     } <= set(
         app.blueprints
     )

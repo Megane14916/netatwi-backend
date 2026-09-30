@@ -38,7 +38,9 @@ from blueprints import interactions as interaction_routes  # noqa: E402
 from blueprints import posts as post_routes  # noqa: E402
 from blueprints import profile as profile_routes  # noqa: E402
 from blueprints import results as result_routes  # noqa: E402
+from blueprints import tasks as task_routes  # noqa: E402
 from blueprints import voting as voting_routes  # noqa: E402
+from cli import process_contests as contest_cli  # noqa: E402
 from app import db  # noqa: E402
 from models import Contest, User  # noqa: E402
 
@@ -149,6 +151,8 @@ def fixed_time(monkeypatch):
         monkeypatch.setattr(result_routes, "datetime", FixedDateTime)
         monkeypatch.setattr(interaction_routes, "datetime", FixedDateTime)
         monkeypatch.setattr(comment_routes, "datetime", FixedDateTime)
+        monkeypatch.setattr(task_routes, "datetime", FixedDateTime)
+        monkeypatch.setattr(contest_cli, "datetime", FixedDateTime)
 
     return freeze
 

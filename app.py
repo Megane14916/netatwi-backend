@@ -398,288 +398,9 @@ def schedule_contest_task(contest_id, event_type, schedule_time):
         print(f"Failed to create task for {event_type}: {e}")
 
 
-@app.route("/api/tasks/contest/<int:id>/<event_type>", methods=["POST"])
-def handle_contest_task(id, event_type):
-    # Security note: In a real app, verify the request comes from Cloud Tasks (e.g. OIDC token)
-    contest = Contest.query.get(id)
-    if not contest:
-        return jsonify({"error": "Contest not found"}), 404
-
-    now = datetime.now(timezone.utc)
-    changed = False
-
-    if event_type == "post_start":
-        if (
-            contest.start_time
-            and now >= contest.start_time.replace(tzinfo=timezone.utc)
-            and not contest.notified_post_start
-        ):
-            print(f"[{contest.id}] Post start notification (Cloud Tasks)")
-            user_ids = db.session.query(User.id).all()
-            notifications = [
-                {
-                    "user_id": uid[0],
-                    "type": "contest_post_start",
-                    "contest_id": contest.id,
-                }
-                for uid in user_ids
-            ]
-            db.session.bulk_insert_mappings(Notification, notifications)
-            contest.notified_post_start = True
-            changed = True
-
-    elif event_type == "voting_start":
-        if (
-            contest.end_time
-            and now >= contest.end_time.replace(tzinfo=timezone.utc)
-            and not contest.notified_voting_start
-        ):
-            print(f"[{contest.id}] Voting start notification (Cloud Tasks)")
-            user_ids = db.session.query(User.id).all()
-            notifications = [
-                {
-                    "user_id": uid[0],
-                    "type": "contest_voting_start",
-                    "contest_id": contest.id,
-                }
-                for uid in user_ids
-            ]
-            db.session.bulk_insert_mappings(Notification, notifications)
-            contest.notified_voting_start = True
-            changed = True
-
-    elif event_type == "result_announce":
-        if (
-            contest.voting_end_time
-            and now >= contest.voting_end_time.replace(tzinfo=timezone.utc)
-            and not contest.notified_result_announce
-        ):
-            print(
-                f"[{contest.id}] Result announce notification & calculation (Cloud Tasks)"
-            )
-            generate_contest_results(contest.id)
-            user_ids = db.session.query(User.id).all()
-            notifications = [
-                {
-                    "user_id": uid[0],
-                    "type": "contest_result_announce",
-                    "contest_id": contest.id,
-                }
-                for uid in user_ids
-            ]
-            db.session.bulk_insert_mappings(Notification, notifications)
-            contest.notified_result_announce = True
-            changed = True
-
-    if changed:
-        db.session.commit()
-        return jsonify({"message": f"Processed {event_type}"}), 200
-
-    return jsonify(
-        {"message": "Task skipped (time not reached or already processed)"}
-    ), 200
-
-
-@app.cli.command("process-contests")
-def process_contests_command():
-    """定期実行バッチ: 大会の状態変化を検知して通知送信や結果集計を行う"""
-    print("--- process-contests batch started ---")
-    now = datetime.now(timezone.utc)
-    contests = Contest.query.all()
-    all_users = None
-
-    for contest in contests:
-        changed = False
-
-        # 投稿開始
-        if (
-            contest.start_time
-            and contest.start_time.replace(tzinfo=timezone.utc) <= now
-            and not contest.notified_post_start
-        ):
-            print(f"[{contest.id}] Post start notification")
-            if all_users is None:
-                all_users = User.query.all()
-            for u in all_users:
-                db.session.add(
-                    Notification(
-                        user_id=u.id, type="contest_post_start", contest_id=contest.id
-                    )
-                )
-            contest.notified_post_start = True
-            changed = True
-
-        # 投票開始
-        if (
-            contest.end_time
-            and contest.end_time.replace(tzinfo=timezone.utc) <= now
-            and not contest.notified_voting_start
-        ):
-            print(f"[{contest.id}] Voting start notification")
-            if all_users is None:
-                all_users = User.query.all()
-            for u in all_users:
-                db.session.add(
-                    Notification(
-                        user_id=u.id, type="contest_voting_start", contest_id=contest.id
-                    )
-                )
-            contest.notified_voting_start = True
-            changed = True
-
-        # 結果発表
-        if (
-            contest.voting_end_time
-            and contest.voting_end_time.replace(tzinfo=timezone.utc) <= now
-            and not contest.notified_result_announce
-        ):
-            print(f"[{contest.id}] Result announce notification & calculation")
-            generate_contest_results(contest.id)
-            if all_users is None:
-                all_users = User.query.all()
-            for u in all_users:
-                db.session.add(
-                    Notification(
-                        user_id=u.id,
-                        type="contest_result_announce",
-                        contest_id=contest.id,
-                    )
-                )
-            contest.notified_result_announce = True
-            changed = True
-
-        if changed:
-            db.session.commit()
-            print(f"[{contest.id}] Committed changes")
-
-    # --- 古い通知の自動削除 (30日経過) ---
-    cutoff_date = now - timedelta(days=30)
-    try:
-        deleted_count = Notification.query.filter(
-            Notification.created_at < cutoff_date
-        ).delete(synchronize_session=False)
-        if deleted_count > 0:
-            db.session.commit()
-            print(f"Deleted {deleted_count} old notifications (older than 30 days)")
-    except Exception as e:
-        db.session.rollback()
-        print(f"Failed to delete old notifications: {e}")
-
-    print("--- process-contests batch completed ---")
-
-
-@app.cli.command("update-user-stats")
-def update_user_stats():
-    """Update UserStats table by aggregating ContestResult data"""
-    from models import Contest, ContestResult, User, UserStats, db
-    from sqlalchemy import case, func
-
-    print("--- update-user-stats batch started ---")
-
-    gp_1st = func.sum(
-        case(((Contest.type == "grandprix") & (ContestResult.rank == 1), 1), else_=0)
-    ).label("gp_1st")
-    gp_2nd = func.sum(
-        case(((Contest.type == "grandprix") & (ContestResult.rank == 2), 1), else_=0)
-    ).label("gp_2nd")
-    gp_3rd = func.sum(
-        case(((Contest.type == "grandprix") & (ContestResult.rank == 3), 1), else_=0)
-    ).label("gp_3rd")
-    daily_1st = func.sum(
-        case(((Contest.type == "daily") & (ContestResult.rank == 1), 1), else_=0)
-    ).label("daily_1st")
-    daily_2nd = func.sum(
-        case(((Contest.type == "daily") & (ContestResult.rank == 2), 1), else_=0)
-    ).label("daily_2nd")
-    daily_3rd = func.sum(
-        case(((Contest.type == "daily") & (ContestResult.rank == 3), 1), else_=0)
-    ).label("daily_3rd")
-    judge_awards = func.sum(
-        case((ContestResult.is_judge_award == True, 1), else_=0)
-    ).label("judge_awards")
-
-    results = (
-        db.session.query(
-            User.id,
-            User.name,
-            gp_1st,
-            gp_2nd,
-            gp_3rd,
-            daily_1st,
-            daily_2nd,
-            daily_3rd,
-            judge_awards,
-        )
-        .outerjoin(ContestResult, User.id == ContestResult.user_id)
-        .outerjoin(Contest, ContestResult.contest_id == Contest.id)
-        .group_by(User.id, User.name)
-        .all()
-    )
-
-    def sort_key(row):
-        return (
-            -(row.gp_1st or 0),
-            -(row.gp_2nd or 0),
-            -(row.gp_3rd or 0),
-            -(row.judge_awards or 0),
-            -(row.daily_1st or 0),
-            -(row.daily_2nd or 0),
-            -(row.daily_3rd or 0),
-            row.name or "",
-        )
-
-    results.sort(key=sort_key)
-
-    existing_stats = {s.user_id: s for s in UserStats.query.all()}
-
-    current_rank = 1
-    tie_count = 0
-    prev_score = None
-
-    for row in results:
-        user_id = row.id
-
-        score = (
-            row.gp_1st or 0,
-            row.gp_2nd or 0,
-            row.gp_3rd or 0,
-            row.judge_awards or 0,
-            row.daily_1st or 0,
-            row.daily_2nd or 0,
-            row.daily_3rd or 0,
-        )
-
-        if prev_score is None:
-            rank = current_rank
-        elif score == prev_score:
-            rank = current_rank
-            tie_count += 1
-        else:
-            current_rank += tie_count + 1
-            rank = current_rank
-            tie_count = 0
-
-        prev_score = score
-
-        stats = existing_stats.get(user_id)
-        if not stats:
-            stats = UserStats(user_id=user_id)
-            db.session.add(stats)
-
-        stats.rank = rank
-        stats.gp_1st = row.gp_1st or 0
-        stats.gp_2nd = row.gp_2nd or 0
-        stats.gp_3rd = row.gp_3rd or 0
-        stats.daily_1st = row.daily_1st or 0
-        stats.daily_2nd = row.daily_2nd or 0
-        stats.daily_3rd = row.daily_3rd or 0
-        stats.judge_awards = row.judge_awards or 0
-
-    db.session.commit()
-    print("--- update-user-stats batch completed ---")
-
-
 from blueprints import BLUEPRINTS
+from blueprints.tasks import handle_contest_task
+from cli import process_contests_command, register_cli, update_user_stats
 
 
 def _register_extracted_routes(application):
@@ -695,18 +416,21 @@ def _register_extracted_routes(application):
         "save_file": lambda *args: save_file(*args),
         "delete_file": lambda *args: delete_file(*args),
         "get_cached_contest_results": lambda *args: get_cached_contest_results(*args),
+        "generate_contest_results": lambda *args: generate_contest_results(*args),
     }
     for blueprint in BLUEPRINTS:
         application.register_blueprint(blueprint)
 
 
 _register_extracted_routes(app)
+register_cli(app)
 
 
 def create_app(config=None):
     """Create an independently configured app with the same routes and CLI."""
     application, _settings = create_base_app(config)
     _register_extracted_routes(application)
+    register_cli(application)
     registered_endpoints = set(application.view_functions)
     for rule in app.url_map.iter_rules():
         if rule.endpoint in registered_endpoints:
