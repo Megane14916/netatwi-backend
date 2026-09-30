@@ -30,6 +30,8 @@ os.environ.update(
 )
 
 import app as app_module  # noqa: E402
+from blueprints import admin as admin_routes  # noqa: E402
+from blueprints import auth as auth_routes  # noqa: E402
 from app import db  # noqa: E402
 from models import Contest, User  # noqa: E402
 
@@ -132,6 +134,7 @@ def fixed_time(monkeypatch):
                 return moment.astimezone(tz) if tz else moment.replace(tzinfo=None)
 
         monkeypatch.setattr(app_module, "datetime", FixedDateTime)
+        monkeypatch.setattr(admin_routes, "datetime", FixedDateTime)
 
     return freeze
 
@@ -145,7 +148,7 @@ def fake_x_authorization(monkeypatch):
         def authorization_url(self, _url, **_kwargs):
             return "https://x.example/authorize", "test-oauth-state"
 
-    monkeypatch.setattr(app_module, "OAuth2Session", FakeOAuthSession)
+    monkeypatch.setattr(auth_routes, "OAuth2Session", FakeOAuthSession)
 
 
 @pytest.fixture
