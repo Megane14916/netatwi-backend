@@ -51,6 +51,7 @@ EXPECTED_ROUTES = {
 
 
 def test_route_contract(app):
+    assert {"auth", "admin", "news"} <= set(app.blueprints)
     actual = {
         (rule.rule, tuple(sorted(rule.methods - {"HEAD", "OPTIONS"})), rule.endpoint)
         for rule in app.url_map.iter_rules()
