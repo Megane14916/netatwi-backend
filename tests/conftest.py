@@ -32,6 +32,9 @@ os.environ.update(
 import app as app_module  # noqa: E402
 from blueprints import admin as admin_routes  # noqa: E402
 from blueprints import auth as auth_routes  # noqa: E402
+from blueprints import contests as contest_routes  # noqa: E402
+from blueprints import posts as post_routes  # noqa: E402
+from blueprints import profile as profile_routes  # noqa: E402
 from app import db  # noqa: E402
 from models import Contest, User  # noqa: E402
 
@@ -58,16 +61,16 @@ def app():
         }
     )
     with flask_app.app_context():
-        app_module._contests_cache = None
-        app_module._contests_cache_time = 0
+        contest_routes._contests_cache = None
+        contest_routes._contests_cache_time = 0
         db.create_all()
         try:
             yield flask_app
         finally:
             db.session.remove()
             db.drop_all()
-            app_module._contests_cache = None
-            app_module._contests_cache_time = 0
+            contest_routes._contests_cache = None
+            contest_routes._contests_cache_time = 0
 
 
 @pytest.fixture
@@ -135,6 +138,9 @@ def fixed_time(monkeypatch):
 
         monkeypatch.setattr(app_module, "datetime", FixedDateTime)
         monkeypatch.setattr(admin_routes, "datetime", FixedDateTime)
+        monkeypatch.setattr(contest_routes, "datetime", FixedDateTime)
+        monkeypatch.setattr(post_routes, "datetime", FixedDateTime)
+        monkeypatch.setattr(profile_routes, "datetime", FixedDateTime)
 
     return freeze
 
