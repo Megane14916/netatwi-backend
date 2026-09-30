@@ -112,10 +112,11 @@ def test_relationships_match_pre_refactor_snapshot():
     assert relationship_contract() == expected
 
 
-def test_alembic_has_no_new_differences_after_migration_upgrade():
+def test_alembic_has_no_new_differences_after_migration_upgrade(tmp_path):
     """The existing Comment.content VARCHAR-to-Text drift predates this split."""
+    database_path = (tmp_path / "migrations.db").as_posix()
     flask_app = create_app(
-        {"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:"}
+        {"TESTING": True, "SQLALCHEMY_DATABASE_URI": f"sqlite:///{database_path}"}
     )
     with flask_app.app_context():
         upgrade()
