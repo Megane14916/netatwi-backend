@@ -4,6 +4,7 @@ import json
 from datetime import timedelta
 from pathlib import Path
 
+import app_config
 from app import app as production_app, create_app
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -33,15 +34,44 @@ def test_production_url_map_matches_pre_refactor_snapshot():
 
 
 def test_factory_creates_isolated_app_with_the_same_routes_and_cli():
-    first = create_app({"TESTING": True, "SECRET_KEY": "first"})
+    first = create_app(
+        {
+            "TESTING": True,
+            "SECRET_KEY": "first",
+            "SQLALCHEMY_DATABASE_URI": "sqlite:///factory-test.db",
+            "FRONTEND_URL": "https://frontend.example/",
+        }
+    )
     second = create_app({"TESTING": True, "SECRET_KEY": "second"})
 
     assert first is not second
     assert first.config["SECRET_KEY"] == "first"
+    assert first.config["SQLALCHEMY_DATABASE_URI"] == "sqlite:///factory-test.db"
+    assert first.config["FRONTEND_URL"] == "https://frontend.example"
     assert second.config["SECRET_KEY"] == "second"
     assert route_map(first) == route_map(second) == ROUTES
     assert {"process-contests", "update-user-stats", "db"} <= set(first.cli.commands)
     assert first.test_client().get("/api/me").get_json() == {"logged_in": False}
+    redirect = first.test_client().get("/api/callback/twitter?error=denied")
+    assert redirect.location == "https://frontend.example?login_error=denied"
+
+
+def test_production_environment_settings(monkeypatch):
+    monkeypatch.setattr(app_config, "load_dotenv", lambda: None)
+    monkeypatch.setenv("FLASK_DEBUG", "False")
+    monkeypatch.setenv("SQLALCHEMY_DATABASE_URI", "postgresql://db.example/netatwi")
+    monkeypatch.setenv("SECRET_KEY", "production-test-key")
+    monkeypatch.setenv("FRONTEND_URL", "https://frontend.example/")
+    monkeypatch.setenv("GCR_URL", "https://backend.example")
+
+    settings = app_config.load_settings()
+
+    assert settings.is_local_dev is False
+    assert settings.backend_url == "https://backend.example"
+    assert settings.frontend_url == "https://frontend.example"
+    assert settings.flask_config["SESSION_COOKIE_SAMESITE"] == "None"
+    assert settings.flask_config["SESSION_COOKIE_SECURE"] is True
+    assert "SESSION_COOKIE_DOMAIN" not in settings.flask_config
 
 
 def test_production_configuration_and_cli_entry_points():

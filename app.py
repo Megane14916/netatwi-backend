@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
-from flask import jsonify, redirect, request, session, url_for
+from flask import current_app, jsonify, redirect, request, session, url_for
 from google.cloud import tasks_v2
 from google.protobuf import timestamp_pb2
 from requests.auth import HTTPBasicAuth
@@ -143,7 +143,7 @@ X_SCOPES = ["tweet.read", "users.read"]
 def twitter_login():
     try:
         # コールバックURLを生成（ローカル環境ではHTTPを使用）
-        callback_url = f"{frontend_url}/api/callback/twitter"
+        callback_url = f"{current_app.config['FRONTEND_URL']}/api/callback/twitter"
         logger.info(f"Generated Callback URL: {callback_url}")
 
         # OAuth 2.0 (PKCE) に必要な安全なランダム文字列を生成
@@ -199,20 +199,20 @@ def twitter_callback():
 
     if error:
         logger.error(f"X Login Error from URL: {error}")
-        return redirect(f"{frontend_url}?login_error={error}")
+        return redirect(f"{current_app.config['FRONTEND_URL']}?login_error={error}")
 
     if not all([session_state, code_verifier, code]):
         logger.error("Missing state, code_verifier, or code in callback.")
         reason = "session_token_missing" if not session_state else "verifier_missing"
-        return redirect(f"{frontend_url}?login_error={reason}")
+        return redirect(f"{current_app.config['FRONTEND_URL']}?login_error={reason}")
 
     # state の一致検証（CSRF対策）
     if url_state != session_state:
         logger.error(f"State mismatch: url={url_state}, session={session_state}")
-        return redirect(f"{frontend_url}?login_error=state_mismatch")
+        return redirect(f"{current_app.config['FRONTEND_URL']}?login_error=state_mismatch")
 
     try:
-        callback_url = f"{frontend_url}/api/callback/twitter"
+        callback_url = f"{current_app.config['FRONTEND_URL']}/api/callback/twitter"
 
         # 1. アクセストークンの取得
         twitter = OAuth2Session(
@@ -284,7 +284,7 @@ def twitter_callback():
             db.session.add(user)
         else:
             if user.deleted_at:
-                return redirect(f"{frontend_url}?login_error=account_deleted")
+                return redirect(f"{current_app.config['FRONTEND_URL']}?login_error=account_deleted")
             user.screen_name = screen_name
             user.name = name
             user.profile_image_url = profile_image_url
@@ -304,9 +304,9 @@ def twitter_callback():
         logger.error(f"!!! ERROR at /api/callback/twitter: {e}")
         traceback.print_exc()
         db.session.rollback()
-        return redirect(f"{frontend_url}?login_error=callback_failed")
+        return redirect(f"{current_app.config['FRONTEND_URL']}?login_error=callback_failed")
 
-    return redirect(frontend_url)
+    return redirect(current_app.config["FRONTEND_URL"])
 
 
 # (以降のコードは変更ありません)

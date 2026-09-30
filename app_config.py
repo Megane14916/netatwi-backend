@@ -63,4 +63,5 @@ def load_settings(overrides=None):
         **session_cookie_config,
         **overrides,
     }
+    config["FRONTEND_URL"] = frontend_url
     return RuntimeSettings(config, frontend_url, backend_url, is_local_dev)
