@@ -2,6 +2,7 @@
 
 import os
 import socket
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -18,6 +19,7 @@ os.environ.update(
         "FLASK_DEBUG": "True",
         "X_CONSUMER_KEY": "test-client-id",
         "X_CONSUMER_SECRET": "test-client-secret",
+        "ADMIN_SCREEN_NAMES": "test_admin",
         "USE_R2": "False",
         "GCP_PROJECT_ID": "",
         "GCP_LOCATION": "",
@@ -29,6 +31,7 @@ os.environ.update(
 
 import app as app_module  # noqa: E402
 from app import app as flask_app, db  # noqa: E402
+from models import Contest, User  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -66,6 +69,64 @@ def client(app):
 @pytest.fixture
 def runner(app):
     return app.test_cli_runner()
+
+
+@pytest.fixture
+def user_factory(app):
+    def create(screen_name):
+        user = User(
+            twitter_id=f"twitter-{screen_name}",
+            screen_name=screen_name,
+            name=screen_name,
+        )
+        db.session.add(user)
+        db.session.commit()
+        return user
+
+    return create
+
+
+@pytest.fixture
+def contest_factory(app):
+    def create(start_time, end_time, voting_end_time, **fields):
+        contest = Contest(
+            name=fields.pop("name", "Test contest"),
+            start_time=start_time,
+            end_time=end_time,
+            voting_end_time=voting_end_time,
+            **fields,
+        )
+        db.session.add(contest)
+        db.session.commit()
+        return contest
+
+    return create
+
+
+@pytest.fixture
+def login(client):
+    def sign_in(user, judge_contests=()):
+        with client.session_transaction() as session:
+            session["user_id"] = user.id
+            session["screen_name"] = user.screen_name
+            session["name"] = user.name
+            session["profile_image_url"] = user.profile_image_url
+            session["judge_for_contest_ids"] = list(judge_contests)
+
+    return sign_in
+
+
+@pytest.fixture
+def fixed_time(monkeypatch):
+    def freeze(moment):
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return moment.astimezone(tz) if tz else moment.replace(tzinfo=None)
+
+        monkeypatch.setattr(app_module, "datetime", FixedDateTime)
+
+    return freeze
 
 
 @pytest.fixture
