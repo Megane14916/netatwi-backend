@@ -3,6 +3,7 @@
 .git
 .gitignore
 venv/
+.venv/
 pycache/
 *.pyc
 *.db
