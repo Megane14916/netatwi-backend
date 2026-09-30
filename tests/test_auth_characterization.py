@@ -8,7 +8,7 @@ import secrets
 import pytest
 import requests
 
-from blueprints import auth as auth_routes
+from integrations import x_oauth
 from models import User, db
 
 
@@ -31,7 +31,7 @@ def fake_oauth(monkeypatch):
     }}
     get = Mock(return_value=response)
     random = Mock(return_value=VERIFIER)
-    monkeypatch.setattr(auth_routes, "OAuth2Session", oauth)
+    monkeypatch.setattr(x_oauth, "OAuth2Session", oauth)
     monkeypatch.setattr(requests, "get", get)
     monkeypatch.setattr(secrets, "token_urlsafe", random)
     return SimpleNamespace(oauth=oauth, response=response, get=get, random=random)

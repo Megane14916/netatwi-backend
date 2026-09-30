@@ -31,7 +31,6 @@ os.environ.update(
 
 import app as app_module  # noqa: E402
 from blueprints import admin as admin_routes  # noqa: E402
-from blueprints import auth as auth_routes  # noqa: E402
 from blueprints import comments as comment_routes  # noqa: E402
 from blueprints import contests as contest_routes  # noqa: E402
 from blueprints import interactions as interaction_routes  # noqa: E402
@@ -41,6 +40,7 @@ from blueprints import results as result_routes  # noqa: E402
 from blueprints import tasks as task_routes  # noqa: E402
 from blueprints import voting as voting_routes  # noqa: E402
 from cli import process_contests as contest_cli  # noqa: E402
+from integrations import x_oauth  # noqa: E402
 from app import db  # noqa: E402
 from models import Contest, User  # noqa: E402
 
@@ -166,7 +166,7 @@ def fake_x_authorization(monkeypatch):
         def authorization_url(self, _url, **_kwargs):
             return "https://x.example/authorize", "test-oauth-state"
 
-    monkeypatch.setattr(auth_routes, "OAuth2Session", FakeOAuthSession)
+    monkeypatch.setattr(x_oauth, "OAuth2Session", FakeOAuthSession)
 
 
 @pytest.fixture
