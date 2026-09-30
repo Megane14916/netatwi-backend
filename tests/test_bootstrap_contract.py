@@ -4,7 +4,7 @@ import json
 from datetime import timedelta
 from pathlib import Path
 
-from app import app as production_app
+from app import app as production_app, create_app
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.exceptions import RequestEntityTooLarge
 
@@ -30,6 +30,18 @@ def route_map(flask_app):
 
 def test_production_url_map_matches_pre_refactor_snapshot():
     assert route_map(production_app) == ROUTES
+
+
+def test_factory_creates_isolated_app_with_the_same_routes_and_cli():
+    first = create_app({"TESTING": True, "SECRET_KEY": "first"})
+    second = create_app({"TESTING": True, "SECRET_KEY": "second"})
+
+    assert first is not second
+    assert first.config["SECRET_KEY"] == "first"
+    assert second.config["SECRET_KEY"] == "second"
+    assert route_map(first) == route_map(second) == ROUTES
+    assert {"process-contests", "update-user-stats", "db"} <= set(first.cli.commands)
+    assert first.test_client().get("/api/me").get_json() == {"logged_in": False}
 
 
 def test_production_configuration_and_cli_entry_points():

@@ -30,7 +30,7 @@ os.environ.update(
 )
 
 import app as app_module  # noqa: E402
-from app import app as flask_app, db  # noqa: E402
+from app import db  # noqa: E402
 from models import Contest, User  # noqa: E402
 
 
@@ -47,7 +47,14 @@ def block_network(monkeypatch):
 
 @pytest.fixture
 def app():
-    flask_app.config["TESTING"] = True
+    flask_app = app_module.create_app(
+        {
+            "TESTING": True,
+            "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+            "SECRET_KEY": "test-only-secret-key",
+            "FRONTEND_URL": "http://localhost:3000",
+        }
+    )
     with flask_app.app_context():
         app_module._contests_cache = None
         app_module._contests_cache_time = 0
