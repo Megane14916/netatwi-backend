@@ -44,7 +44,10 @@ def schema_ddl():
     dialect = sqlite.dialect()
     statements = []
     for table in sorted(models.db.metadata.tables.values(), key=lambda table: table.name):
-        statements.append(str(CreateTable(table).compile(dialect=dialect)).strip() + ";")
+        create_table = str(CreateTable(table).compile(dialect=dialect)).strip()
+        statements.append(
+            "\n".join(line.rstrip() for line in create_table.splitlines()) + ";"
+        )
         for index in sorted(table.indexes, key=lambda index: index.name):
             statements.append(str(CreateIndex(index).compile(dialect=dialect)).strip() + ";")
     return "\n\n".join(statements) + "\n"
