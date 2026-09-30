@@ -10,6 +10,7 @@ from .notifications import bp as notifications_bp
 from .posts import bp as posts_bp
 from .profile import bp as profile_bp
 from .results import bp as results_bp
+from .tasks import bp as tasks_bp
 from .users import bp as users_bp
 from .voting import bp as voting_bp
 
@@ -27,4 +28,5 @@ BLUEPRINTS = (
     comments_bp,
     notifications_bp,
     users_bp,
+    tasks_bp,
 )
