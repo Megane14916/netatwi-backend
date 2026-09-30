@@ -1,6 +1,7 @@
 """Schema and mapper contracts captured before splitting models.py."""
 
 import json
+from importlib import import_module
 from pathlib import Path
 
 import models
@@ -20,6 +21,18 @@ MODEL_NAMES = {
     "ContestResult",
     "UserStats",
     "News",
+}
+MODEL_MODULES = {
+    "User": "user",
+    "Contest": "contest",
+    "Post": "post",
+    "Vote": "vote",
+    "Bookmark": "bookmark",
+    "Comment": "comment",
+    "Notification": "notification",
+    "ContestResult": "contest_result",
+    "UserStats": "user_stats",
+    "News": "news",
 }
 
 
@@ -72,6 +85,13 @@ def test_all_models_are_exported_and_registered():
     }
     for name in MODEL_NAMES:
         assert getattr(models, name) is registered[name]
+
+
+def test_each_model_module_uses_the_shared_db():
+    for name, module_name in MODEL_MODULES.items():
+        module = import_module(f"models.{module_name}")
+        assert getattr(module, name) is getattr(models, name)
+        assert module.db is models.db
 
 
 def test_ddl_matches_pre_refactor_snapshot():
