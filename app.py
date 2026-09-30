@@ -1,21 +1,29 @@
+import base64
+import boto3  # R2用
+import hashlib
 import json
 import logging
 import os
 import re
+import secrets
 import time
 import traceback
 import uuid
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
-import boto3  # R2用
-from dotenv import load_dotenv
-from flask import Flask, jsonify, redirect, request, session, url_for
-from flask_cors import CORS
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
-from flask_migrate import Migrate
-from flask_sqlalchemy import SQLAlchemy
+from flask import current_app, jsonify, redirect, request, session, url_for
+from google.cloud import tasks_v2
+from google.protobuf import timestamp_pb2
+from requests.auth import HTTPBasicAuth
+from requests_oauthlib import OAuth1Session, OAuth2Session
+from sqlalchemy import case, distinct, func
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload
+from werkzeug.utils import secure_filename
+
+from app_factory import create_base_app
+from app_extensions import limiter, migrate
 from models import (
     Bookmark,
     Comment,
@@ -28,134 +36,13 @@ from models import (
     Vote,
     db,
 )
-from requests_oauthlib import OAuth1Session
-from sqlalchemy import case, distinct, event, func
-from sqlalchemy.engine import Engine
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import joinedload
-from werkzeug.middleware.proxy_fix import ProxyFix
-from werkzeug.utils import secure_filename
 
-
-@event.listens_for(Engine, "before_cursor_execute")
-def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
-    conn.info.setdefault("query_start_time", []).append(time.time())
-
-
-@event.listens_for(Engine, "after_cursor_execute")
-def after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
-    total = time.time() - conn.info["query_start_time"].pop(-1)
-    if total > 0.05:
-        logger.info(f"[SQL_SLOW] {total:.4f}s: {statement[:100]}...")
-
-
-import base64
-import hashlib
-import secrets
-
-from google.cloud import tasks_v2
-from google.protobuf import timestamp_pb2
-from requests.auth import HTTPBasicAuth
-from requests_oauthlib import OAuth2Session
-
-load_dotenv()
-
-# --- 環境変数の読み込みと検証 ---
-db_uri = os.environ.get("SQLALCHEMY_DATABASE_URI")
-secret_key = os.environ.get("SECRET_KEY")
-frontend_url = os.environ.get("FRONTEND_URL", "").rstrip("/")
-gcp_backend_url = os.environ.get("GCR_URL")  # GCPで設定したCloud RunのURL
-
-# FLASK_DEBUGがTrueの場合 (ローカルの.envファイル) のみローカル開発とみなす
-is_local_dev = os.environ.get("FLASK_DEBUG") == "True"
-backend_url = "http://127.0.0.1:5001"  # ローカルのFlask URL
-
-if is_local_dev:
-    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
-    db_uri = db_uri or "sqlite:///project.db"
-    secret_key = secret_key or "a-very-secret-key-for-local-dev"
-    frontend_url = frontend_url or "http://localhost:3000"
-else:
-    # 本番環境(GCP)では、GCR_URLを使用
-    backend_url = gcp_backend_url
-
-if not db_uri:
-    raise ValueError(
-        "FATAL_ERROR: SQLALCHEMY_DATABASE_URI environment variable is not set."
-    )
-if not secret_key:
-    raise ValueError("FATAL_ERROR: SECRET_KEY environment variable is not set.")
-if not frontend_url:
-    raise ValueError("FATAL_ERROR: FRONTEND_URL environment variable is not set.")
-
-app = Flask(__name__)
-
-limiter = Limiter(
-    get_remote_address,
-    app=app,
-    default_limits=["10000 per day", "5000 per hour"],
-    storage_uri="memory://"
-)
-
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=0, x_prefix=0)
-
-logging.basicConfig(level=logging.INFO)
+app, runtime_settings = create_base_app()
+frontend_url = runtime_settings.frontend_url
+backend_url = runtime_settings.backend_url
+is_local_dev = runtime_settings.is_local_dev
 logger = logging.getLogger(__name__)
-
-# --- アプリケーション設定 ---
-# 環境に応じたセッションCookie設定
-if is_local_dev:
-    # ローカル開発環境: HTTP対応設定
-    session_cookie_config = {
-        "SESSION_COOKIE_SAMESITE": "Lax",
-        "SESSION_COOKIE_SECURE": False,
-        "SESSION_COOKIE_DOMAIN": "localhost",
-    }
-else:
-    # 本番環境: HTTPS対応設定 (Cross-Origin)
-    session_cookie_config = {
-        "SESSION_COOKIE_SAMESITE": "None",
-        "SESSION_COOKIE_SECURE": True,
-    }
-
-app.config.update(
-    SECRET_KEY=secret_key,
-    SQLALCHEMY_DATABASE_URI=db_uri,
-    SQLALCHEMY_ENGINE_OPTIONS={
-        "pool_pre_ping": True,
-        "pool_recycle": 300,  # 5分ごとに接続をリサイクル
-    },
-    SESSION_COOKIE_HTTPONLY=True,
-    PERMANENT_SESSION_LIFETIME=timedelta(days=31),
-    # フロントエンドの画像合計上限 (16 MiB) に multipart の
-    # オーバーヘッド分の余裕を持たせる。
-    MAX_CONTENT_LENGTH=17 * 1024 * 1024,
-    **session_cookie_config,  # 環境に応じた設定を展開
-)
-
 JST = timezone(timedelta(hours=9), "JST")
-
-# --- CORS設定 (最重要) ---
-# 環境変数から読み取ったフロントエンドのURLを許可する
-CORS(app, supports_credentials=True, origins=[frontend_url])
-# ---
-db.init_app(app)
-migrate = Migrate(app, db)
-
-
-@app.errorhandler(413)
-def request_entity_too_large(_error):
-    """容量超過をフロントエンドが解釈できる JSON で返す。"""
-    return (
-        jsonify(
-            {
-                "error": "画像の合計サイズが上限を超えています（最大16 MiB）",
-                "code": "PAYLOAD_TOO_LARGE",
-                "maxBytes": 16 * 1024 * 1024,
-            }
-        ),
-        413,
-    )
 
 UPLOAD_FOLDER = "static/uploads"
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
@@ -252,35 +139,11 @@ USER_INFO_URL = "https://api.x.com/2/users/me"
 X_SCOPES = ["tweet.read", "users.read"]
 
 
-@app.before_request
-def log_request_info():
-    if request.path.startswith("/api/login") or request.path.startswith(
-        "/api/callback"
-    ):
-        logger.info(f"=== REQUEST START: {request.path} ===")
-        logger.info(f"Headers: {dict(request.headers)}")
-        logger.info(f"Cookies sent from browser: {request.cookies}")
-        logger.info(f"Session (before processing): {dict(session)}")
-        logger.info(f"X-Forwarded-Proto: {request.headers.get('X-Forwarded-Proto')}")
-        logger.info(f"Is Secure (Flask detected): {request.is_secure}")
-
-
-@app.after_request
-def add_cache_control_headers(response):
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    # Cookieごとにレスポンスを分けさせる。CDN/リバースプロキシがCookieを無視して
-    # URLだけでキャッシュし、別ユーザーに他人のレスポンスを返す事故を防ぐ。
-    response.headers["Vary"] = "Cookie"
-    return response
-
-
 @app.route("/api/login/twitter")
 def twitter_login():
     try:
         # コールバックURLを生成（ローカル環境ではHTTPを使用）
-        callback_url = f"{frontend_url}/api/callback/twitter"
+        callback_url = f"{current_app.config['FRONTEND_URL']}/api/callback/twitter"
         logger.info(f"Generated Callback URL: {callback_url}")
 
         # OAuth 2.0 (PKCE) に必要な安全なランダム文字列を生成
@@ -336,20 +199,20 @@ def twitter_callback():
 
     if error:
         logger.error(f"X Login Error from URL: {error}")
-        return redirect(f"{frontend_url}?login_error={error}")
+        return redirect(f"{current_app.config['FRONTEND_URL']}?login_error={error}")
 
     if not all([session_state, code_verifier, code]):
         logger.error("Missing state, code_verifier, or code in callback.")
         reason = "session_token_missing" if not session_state else "verifier_missing"
-        return redirect(f"{frontend_url}?login_error={reason}")
+        return redirect(f"{current_app.config['FRONTEND_URL']}?login_error={reason}")
 
     # state の一致検証（CSRF対策）
     if url_state != session_state:
         logger.error(f"State mismatch: url={url_state}, session={session_state}")
-        return redirect(f"{frontend_url}?login_error=state_mismatch")
+        return redirect(f"{current_app.config['FRONTEND_URL']}?login_error=state_mismatch")
 
     try:
-        callback_url = f"{frontend_url}/api/callback/twitter"
+        callback_url = f"{current_app.config['FRONTEND_URL']}/api/callback/twitter"
 
         # 1. アクセストークンの取得
         twitter = OAuth2Session(
@@ -421,7 +284,7 @@ def twitter_callback():
             db.session.add(user)
         else:
             if user.deleted_at:
-                return redirect(f"{frontend_url}?login_error=account_deleted")
+                return redirect(f"{current_app.config['FRONTEND_URL']}?login_error=account_deleted")
             user.screen_name = screen_name
             user.name = name
             user.profile_image_url = profile_image_url
@@ -441,9 +304,9 @@ def twitter_callback():
         logger.error(f"!!! ERROR at /api/callback/twitter: {e}")
         traceback.print_exc()
         db.session.rollback()
-        return redirect(f"{frontend_url}?login_error=callback_failed")
+        return redirect(f"{current_app.config['FRONTEND_URL']}?login_error=callback_failed")
 
-    return redirect(frontend_url)
+    return redirect(current_app.config["FRONTEND_URL"])
 
 
 # (以降のコードは変更ありません)
@@ -3049,6 +2912,32 @@ def get_users_list():
             "has_prev": pagination.has_prev,
         }
     ), 200
+
+
+def create_app(config=None):
+    """Create an independently configured app while routes still live here.
+
+    Route definitions move in later issues. Until then, replay their registered
+    URL rules and CLI commands onto each new instance.
+    """
+    application, _settings = create_base_app(config)
+    for rule in app.url_map.iter_rules():
+        if rule.endpoint == "static":
+            continue
+        application.add_url_rule(
+            rule.rule,
+            endpoint=rule.endpoint,
+            view_func=app.view_functions[rule.endpoint],
+            methods=rule.methods,
+            defaults=rule.defaults,
+            subdomain=rule.subdomain,
+            strict_slashes=rule.strict_slashes,
+            provide_automatic_options=rule.provide_automatic_options,
+        )
+    for name, command in app.cli.commands.items():
+        if name not in application.cli.commands:
+            application.cli.add_command(command, name)
+    return application
 
 
 if __name__ == "__main__":

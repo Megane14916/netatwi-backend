@@ -8,6 +8,6 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-macOS／Linux では `python3.11 -m venv .venv` を実行し、以後は `.venv/bin/python` を使う。テストは `app` の import 前に一時 SQLite DB とダミーの資格情報を設定し、外部ネットワーク接続を拒否する。X API、R2、Cloud Tasks は fake を使うため、本番の `.env` や実サービスの資格情報は不要。
+macOS／Linux では `python3.11 -m venv .venv` を実行し、以後は `.venv/bin/python` を使う。テストは `app` の import 前に安全な環境変数を設定し、fixture で `create_app` に一時 SQLite DB などの設定を渡す。外部ネットワーク接続を拒否し、X API、R2、Cloud Tasks には fake を使うため、本番の `.env` や実サービスの資格情報は不要。
 
 GitHub Actions も Python 3.11 で同じ `python -m pytest -q` を実行する。
