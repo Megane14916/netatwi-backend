@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask.cli import AppGroup
 
-from blueprints.dependencies import generate_contest_results
+from services import results as results_service
 from models import Contest, Notification, User, db
 
 
@@ -65,7 +65,7 @@ def process_contests_command():
             and not contest.notified_result_announce
         ):
             print(f"[{contest.id}] Result announce notification & calculation")
-            generate_contest_results(contest.id)
+            results_service.generate_contest_results(contest.id)
             if all_users is None:
                 all_users = User.query.all()
             for u in all_users:
