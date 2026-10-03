@@ -1,11 +1,8 @@
-import boto3  # R2用
 import logging
 import os
 import re
 import traceback
-import uuid
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlparse
 
 from flask import jsonify, redirect, request, session, url_for
 from google.cloud import tasks_v2
@@ -13,9 +10,9 @@ from google.protobuf import timestamp_pb2
 from sqlalchemy import case, distinct, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
-from werkzeug.utils import secure_filename
 
 from app_factory import create_base_app
+from integrations import images as image_storage
 from app_extensions import migrate
 from models import (
     Bookmark,
@@ -47,75 +44,36 @@ R2_PUBLIC_URL = os.environ.get("R2_PUBLIC_URL", "").rstrip("/")
 
 
 def get_r2_client():
-    return boto3.client(
-        "s3",
-        endpoint_url=os.environ.get("R2_ENDPOINT_URL"),
-        aws_access_key_id=os.environ.get("R2_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.environ.get("R2_SECRET_ACCESS_KEY"),
-        region_name="auto",
-    )
+    return image_storage.get_r2_client()
 
 
 def allowed_file(filename):
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+    return image_storage.allowed_file(filename, ALLOWED_EXTENSIONS=ALLOWED_EXTENSIONS)
 
 
 def save_file(file):
     """ファイルを保存し、パブリックURLを返す"""
-    filename = secure_filename(file.filename)
-    # ユニークなファイル名にする
-    ext = filename.rsplit(".", 1)[1].lower()
-    unique_filename = f"{uuid.uuid4().hex}.{ext}"
-
-    if USE_R2:
-        try:
-            s3 = get_r2_client()
-            s3.upload_fileobj(
-                file,
-                R2_BUCKET_NAME,
-                unique_filename,
-                ExtraArgs={"ContentType": file.content_type},
-            )
-            return f"{R2_PUBLIC_URL}/{unique_filename}"
-        except Exception as e:
-            logger.error(f"R2 Upload Error: {e}")
-            raise e
-    else:
-        # ローカル保存
-        file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
-        file.save(file_path)
-        # FlaskのstaticファイルとしてのURLを返す (本番ではFRONTEND_URL経由でアクセスできる前提)
-        # ここではバックエンドのURLを返す必要がある (CORS等注意)
-        # 開発環境では http://localhost:5001/static/uploads/... となる
-        return f"/static/uploads/{unique_filename}"
+    return image_storage.save_file(
+        file,
+        UPLOAD_FOLDER=UPLOAD_FOLDER,
+        USE_R2=USE_R2,
+        R2_BUCKET_NAME=R2_BUCKET_NAME,
+        R2_PUBLIC_URL=R2_PUBLIC_URL,
+        get_r2_client=get_r2_client,
+        logger=logger,
+    )
 
 
 def delete_file(file_url):
     """URLからファイルを特定して削除する"""
-    try:
-        if not file_url:
-            return
-
-        # ファイル名の抽出
-        parsed_url = urlparse(file_url)
-        filename = os.path.basename(parsed_url.path)
-
-        if USE_R2:
-            # R2から削除
-            try:
-                s3 = get_r2_client()
-                logger.info(f"Deleting from R2: {filename}")
-                s3.delete_object(Bucket=R2_BUCKET_NAME, Key=filename)
-            except Exception as e:
-                logger.error(f"Failed to delete from R2: {e}")
-        else:
-            # ローカルから削除
-            file_path = os.path.join(UPLOAD_FOLDER, filename)
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                logger.info(f"Deleted local file: {file_path}")
-    except Exception as e:
-        logger.error(f"Error deleting file {file_url}: {e}")
+    return image_storage.delete_file(
+        file_url,
+        UPLOAD_FOLDER=UPLOAD_FOLDER,
+        USE_R2=USE_R2,
+        R2_BUCKET_NAME=R2_BUCKET_NAME,
+        get_r2_client=get_r2_client,
+        logger=logger,
+    )
 
 
 
