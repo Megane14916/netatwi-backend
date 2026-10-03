@@ -1,10 +1,11 @@
 """Comment listing and mutation routes."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta, timezone
 
 from flask import jsonify, request, session
 
-from models import Comment, Notification, Post, db
+from models import Comment, Post, db
+from services import notifications as notifications_service
 from .legacy import LegacyEndpointBlueprint
 
 
@@ -119,20 +120,7 @@ def add_comment(post_id):
     Post.query.filter_by(id=post_id).update({"comment_count": Post.comment_count + 1})
 
     # 結果期間中であれば通知作成
-    contest = post.contest
-    now = datetime.now(timezone.utc)
-    if (
-        now >= contest.voting_end_time.replace(tzinfo=timezone.utc)
-        and user_id != post.user_id
-    ):
-        notification = Notification(
-            user_id=post.user_id,
-            sender_id=user_id,
-            type="comment",
-            post_id=post_id,
-            contest_id=post.contest_id,
-        )
-        db.session.add(notification)
+    notifications_service.create_comment_notification(post, post_id, user_id)
 
     db.session.commit()
     return jsonify({"message": "Comment added successfully", "id": new_comment.id}), 201
