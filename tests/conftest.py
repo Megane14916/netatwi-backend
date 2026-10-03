@@ -37,10 +37,9 @@ from blueprints import interactions as interaction_routes  # noqa: E402
 from services import posts as post_service  # noqa: E402
 from blueprints import profile as profile_routes  # noqa: E402
 from services import results as results_service  # noqa: E402
-from blueprints import tasks as task_routes  # noqa: E402
+from services import contest_lifecycle  # noqa: E402
 from services import voting as voting_service  # noqa: E402
-from cli import process_contests as contest_cli  # noqa: E402
-from integrations import x_oauth  # noqa: E402
+from integrations import cloud_tasks, x_oauth  # noqa: E402
 from app import db  # noqa: E402
 from models import Contest, User  # noqa: E402
 
@@ -151,8 +150,8 @@ def fixed_time(monkeypatch):
         monkeypatch.setattr(results_service, "datetime", FixedDateTime)
         monkeypatch.setattr(interaction_routes, "datetime", FixedDateTime)
         monkeypatch.setattr(comment_routes, "datetime", FixedDateTime)
-        monkeypatch.setattr(task_routes, "datetime", FixedDateTime)
-        monkeypatch.setattr(contest_cli, "datetime", FixedDateTime)
+        monkeypatch.setattr(contest_lifecycle, "datetime", FixedDateTime)
+        monkeypatch.setattr(cloud_tasks, "datetime", FixedDateTime)
 
     return freeze
 
@@ -184,7 +183,7 @@ def fake_cloud_tasks(monkeypatch):
     client = Mock()
     client.queue_path.return_value = "projects/test/locations/test/queues/test"
     client.create_task.return_value = SimpleNamespace(name="test-task")
-    monkeypatch.setattr(app_module, "_cloud_tasks_client", client)
+    monkeypatch.setattr(cloud_tasks, "_cloud_tasks_client", client)
     monkeypatch.setenv("GCP_PROJECT_ID", "test")
     monkeypatch.setenv("GCP_LOCATION", "test")
     monkeypatch.setenv("GCP_QUEUE_NAME", "test")

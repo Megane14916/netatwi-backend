@@ -8,11 +8,12 @@ from sqlalchemy import event
 from google.cloud import tasks_v2
 
 import app as app_module
+from integrations import cloud_tasks
 from models import Bookmark, Comment, Contest, ContestResult, Notification, Post, Vote, db
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
-scheduler_module = app_module
+scheduler_module = cloud_tasks
 PAYLOAD = {"name": "Contest", "startTime": "2026-01-01T12:00:00Z",
            "endTime": "2026-01-01T13:00:00Z", "votingEndTime": "2026-01-01T14:00:00Z"}
 
