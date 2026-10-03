@@ -7,7 +7,7 @@ from flask import jsonify, session
 from sqlalchemy.orm import joinedload
 
 from models import Bookmark, Post, User, Vote, db
-from .dependencies import get_cached_contest_results
+from services import results as results_service
 from .legacy import LegacyEndpointBlueprint
 
 
@@ -169,7 +169,7 @@ def get_user_profile_updated(screen_name):
             for post in posts_list:
                 cid = post.contest_id
                 if cid not in results_cache:
-                    results_cache[cid] = get_cached_contest_results(cid)
+                    results_cache[cid] = results_service.get_cached_contest_results(cid)
                 res = results_cache[cid].get(post.id)
 
                 post_voters = voters_map.get(post.id, [])

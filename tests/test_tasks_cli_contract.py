@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 import app as app_module
+from services import results as results_service
 from models import Contest, ContestResult, Notification, Post, UserStats, db
 
 
@@ -29,7 +30,7 @@ def observe_effects(monkeypatch):
 
         monkeypatch.setattr(target, name, recorded)
 
-    wrap(app_module, "generate_contest_results", "generate")
+    wrap(results_service, "generate_contest_results", "generate")
     wrap(db.session, "bulk_save_objects", "results")
     wrap(db.session, "bulk_insert_mappings", "notifications")
     wrap(db.session, "commit", "commit")
@@ -253,7 +254,7 @@ def test_result_generation_failure_propagates_before_notification_commit(
         events.append("generate failure")
         raise RuntimeError("generation failed")
 
-    monkeypatch.setattr(app_module, "generate_contest_results", fail_generation)
+    monkeypatch.setattr(results_service, "generate_contest_results", fail_generation)
     if entry_point == "task":
         with pytest.raises(RuntimeError, match="generation failed"):
             client.post(f"/api/tasks/contest/{contest.id}/result_announce")

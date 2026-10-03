@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from flask import jsonify
 
 from models import Contest, Notification, User, db
-from .dependencies import generate_contest_results
+from services import results as results_service
 from .legacy import LegacyEndpointBlueprint
 
 
@@ -71,7 +71,7 @@ def handle_contest_task(id, event_type):
             print(
                 f"[{contest.id}] Result announce notification & calculation (Cloud Tasks)"
             )
-            generate_contest_results(contest.id)
+            results_service.generate_contest_results(contest.id)
             user_ids = db.session.query(User.id).all()
             notifications = [
                 {

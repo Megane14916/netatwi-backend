@@ -36,7 +36,7 @@ from blueprints import contests as contest_routes  # noqa: E402
 from blueprints import interactions as interaction_routes  # noqa: E402
 from services import posts as post_service  # noqa: E402
 from blueprints import profile as profile_routes  # noqa: E402
-from blueprints import results as result_routes  # noqa: E402
+from services import results as results_service  # noqa: E402
 from blueprints import tasks as task_routes  # noqa: E402
 from services import voting as voting_service  # noqa: E402
 from cli import process_contests as contest_cli  # noqa: E402
@@ -148,7 +148,7 @@ def fixed_time(monkeypatch):
         monkeypatch.setattr(post_service, "datetime", FixedDateTime)
         monkeypatch.setattr(profile_routes, "datetime", FixedDateTime)
         monkeypatch.setattr(voting_service, "datetime", FixedDateTime)
-        monkeypatch.setattr(result_routes, "datetime", FixedDateTime)
+        monkeypatch.setattr(results_service, "datetime", FixedDateTime)
         monkeypatch.setattr(interaction_routes, "datetime", FixedDateTime)
         monkeypatch.setattr(comment_routes, "datetime", FixedDateTime)
         monkeypatch.setattr(task_routes, "datetime", FixedDateTime)
