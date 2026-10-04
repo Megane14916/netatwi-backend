@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy.orm import Query
 
 from blueprints import profile as routes
-from blueprints import profile as query_module
+from services import profile as query_module
 from services import results as results_service
 from models import Bookmark, ContestResult, Post, Vote, db
 
