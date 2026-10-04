@@ -2,17 +2,16 @@
 
 import os
 import traceback
-from datetime import datetime, timedelta, timezone
 
 from flask import current_app, jsonify, request, session
 
-from models import Contest, db
+from models import db
 from services import contest_lifecycle
+from services import contests as contest_service
 from .legacy import LegacyEndpointBlueprint
 
 
 bp = LegacyEndpointBlueprint("admin", __name__)
-JST = timezone(timedelta(hours=9), "JST")
 
 
 def schedule_contest_task(*args):
@@ -59,49 +58,7 @@ def get_management_contests():
         return jsonify({"error": "Forbidden: Admins only"}), 403
 
     try:
-        now = datetime.now(timezone.utc)
-        # 投票終了時間が現在時刻より未来の大会を取得 (upcoming, ongoing, voting)
-        # 開始時間が新しい順 (最近作成されたものが上に来る)
-        active_contests = (
-            Contest.query.filter(Contest.voting_end_time >= now)
-            .order_by(Contest.start_time.desc())
-            .all()
-        )
-
-        contests_data = []
-        for contest in active_contests:
-            contests_data.append(
-                {
-                    "id": contest.id,
-                    "name": contest.name,
-                    "theme": contest.theme if contest.has_theme else None,
-                    "hasQualifier": contest.has_qualifier,
-                    "startTime": contest.start_time.replace(tzinfo=timezone.utc)
-                    .astimezone(JST)
-                    .isoformat(),
-                    "endTime": contest.end_time.replace(tzinfo=timezone.utc)
-                    .astimezone(JST)
-                    .isoformat(),
-                    "votingEndTime": contest.voting_end_time.replace(
-                        tzinfo=timezone.utc
-                    )
-                    .astimezone(JST)
-                    .isoformat(),
-                    "judgePassword": contest.judge_password,  # パスワードも含める
-                    "type": contest.type,
-                    "scoringMethod": contest.scoring_method,
-                    "imageRule": contest.image_rule,
-                    "generalVoteWeight": contest.general_vote_weight,
-                    "judgeMaxScore": contest.judge_max_score,
-                    "isVotingVisible": contest.is_voting_visible,
-                    "advancementNumerator": contest.advancement_numerator,
-                    "advancementDenominator": contest.advancement_denominator,
-                    "judgeAwardAdvancement": contest.judge_award_advancement,
-                    "resultCommentTop": contest.result_comment_top,
-                    "resultCommentBottom": contest.result_comment_bottom,
-                }
-            )
-        return jsonify(contests_data)
+        return jsonify(contest_service.get_management_contests())
     except Exception as e:
         print(f"!!! ERROR at GET /api/admin/contests/management: {e}")
         traceback.print_exc()

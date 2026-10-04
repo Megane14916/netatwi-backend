@@ -10,7 +10,7 @@ from sqlalchemy.orm import Query
 from app import create_app
 from blueprints import admin as admin_routes
 from blueprints import contests as public_routes
-from blueprints import contests as query_module
+from services import contests as query_module
 from models import Contest, ContestResult, Post, db
 
 

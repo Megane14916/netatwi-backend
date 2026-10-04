@@ -30,9 +30,8 @@ os.environ.update(
 )
 
 import app as app_module  # noqa: E402
-from blueprints import admin as admin_routes  # noqa: E402
 from services import notifications as notifications_service  # noqa: E402
-from blueprints import contests as contest_routes  # noqa: E402
+from services import contests as contest_service  # noqa: E402
 from services import interactions as interaction_service  # noqa: E402
 from services import posts as post_service  # noqa: E402
 from blueprints import profile as profile_routes  # noqa: E402
@@ -66,16 +65,16 @@ def app():
         }
     )
     with flask_app.app_context():
-        contest_routes._contests_cache = None
-        contest_routes._contests_cache_time = 0
+        contest_service._contests_cache = None
+        contest_service._contests_cache_time = 0
         db.create_all()
         try:
             yield flask_app
         finally:
             db.session.remove()
             db.drop_all()
-            contest_routes._contests_cache = None
-            contest_routes._contests_cache_time = 0
+            contest_service._contests_cache = None
+            contest_service._contests_cache_time = 0
 
 
 @pytest.fixture
@@ -142,8 +141,7 @@ def fixed_time(monkeypatch):
                 return moment.astimezone(tz) if tz else moment.replace(tzinfo=None)
 
         monkeypatch.setattr(app_module, "datetime", FixedDateTime)
-        monkeypatch.setattr(admin_routes, "datetime", FixedDateTime)
-        monkeypatch.setattr(contest_routes, "datetime", FixedDateTime)
+        monkeypatch.setattr(contest_service, "datetime", FixedDateTime)
         monkeypatch.setattr(post_service, "datetime", FixedDateTime)
         monkeypatch.setattr(profile_routes, "datetime", FixedDateTime)
         monkeypatch.setattr(voting_service, "datetime", FixedDateTime)
