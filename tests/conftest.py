@@ -33,7 +33,7 @@ import app as app_module  # noqa: E402
 from blueprints import admin as admin_routes  # noqa: E402
 from services import notifications as notifications_service  # noqa: E402
 from blueprints import contests as contest_routes  # noqa: E402
-from blueprints import interactions as interaction_routes  # noqa: E402
+from services import interactions as interaction_service  # noqa: E402
 from services import posts as post_service  # noqa: E402
 from blueprints import profile as profile_routes  # noqa: E402
 from services import results as results_service  # noqa: E402
@@ -148,7 +148,7 @@ def fixed_time(monkeypatch):
         monkeypatch.setattr(profile_routes, "datetime", FixedDateTime)
         monkeypatch.setattr(voting_service, "datetime", FixedDateTime)
         monkeypatch.setattr(results_service, "datetime", FixedDateTime)
-        monkeypatch.setattr(interaction_routes, "datetime", FixedDateTime)
+        monkeypatch.setattr(interaction_service, "datetime", FixedDateTime)
         monkeypatch.setattr(notifications_service, "datetime", FixedDateTime)
         monkeypatch.setattr(contest_lifecycle, "datetime", FixedDateTime)
         monkeypatch.setattr(cloud_tasks, "datetime", FixedDateTime)
