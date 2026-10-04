@@ -4,9 +4,11 @@
 
 `netatwi-backend` の保守性と検証可能性を上げる。対象はバックエンドの Flask アプリ、SQLAlchemy モデル、バッチ／外部サービスとの接続、テストである。フロントエンドは別リポジトリとして扱い、バックエンドの API 契約を先に固定する。
 
-この計画では **(1) 現行動作の記録とテスト、(2) ファイルの移動・分割、(3) services 層への責務の移動、(4) 挙動を改善する修正** を順番に進める。ファイル分割とロジック改善は同じ PR に入れない。構造変更 PR では URL、HTTP メソッド、ステータス、JSON のキーと型、認証条件、DB スキーマ、時刻・スコア計算、外部サービスへの副作用を維持する。現行動作に不具合があれば再現テストと修正を別 Issue／PR にする。
+この計画では **(1) 現行動作の記録とテスト、(2) ファイルの移動・分割、(3) services 層への責務の移動と最終構成への配置統一、(4) 挙動を改善する修正** を順番に進める。ファイル分割とロジック改善は同じ PR に入れない。構造変更 PR では URL、HTTP メソッド、ステータス、JSON のキーと型、認証条件、DB スキーマ、時刻・スコア計算、外部サービスへの副作用を維持する。現行動作に不具合があれば再現テストと修正を別 Issue／PR にする。
 
-## 調査時点の状態
+## 当初の調査時点の状態
+
+以下は計画作成時の記録であり、現在の配置・テスト数・実行環境を表すものではない。
 
 - デフォルトブランチと PR の取り込み先は `master` とする。現在のチェックアウトも `master`（`origin/master` を追跡）。`dev` と `fix/x-login-bug` は作業ブランチの起点に使わない。
 - `app.py` は約 3,064 行、`@app.route` は 35 箇所。起動時設定、CORS・Limiter・Migrate、X OAuth、投稿と画像、投票、結果集計、プロフィール、管理 API、ニュース、コメント、通知、Cloud Tasks、CLI コマンドが混在している。
@@ -18,22 +20,31 @@
 - `migrations/` は `.gitignore` に指定されている。既存の追跡ファイルはあるが、新しい revision の扱いはスキーマ変更 Issue で明示する。モデル分割 PR は migration 不要・自動生成差分ゼロを条件とする。
 - 調査環境の `venv` と `py` ランチャーは Python プロセスを起動できず、現時点で pytest の実行結果は取得できていない。最初の Issue で再現可能な Python 環境と実行手順を確立する。
 
+## 現在の進捗と残作業（2026-10-04 更新）
+
+- #3〜#11 のテスト・起動・モデル・Blueprint・CLI の分割と、#12〜#17 の認証、投稿・画像、投票、結果、大会ライフサイクル、通知・統計の service 抽出を取り込み済み。
+- 直近の #17／PR #42 の検証記録では、移動前の既存テスト225件、追加した特性テスト14件、移動後の全テスト239件が成功し、GitHub Actions の Python 3.11 でも成功した。詳細は [issue-17-verification.md](issue-17-verification.md) を参照する。
+- #12〜#17 の完了は、全 route の service 抽出と最終配置の完了を意味しない。コメント・いいね・ブックマークの本体、大会・投稿・プロフィール・ユーザー・ニュースの参照／更新処理、退会処理などが route 内に残っている。
+- 現在は `blueprints/`、`models/`、`services/`、`integrations/`、`cli/` がリポジトリ直下にある。`app.py` に4つの route、文字数計算、factory・登録処理が残り、一部 service は `blueprints.dependencies` を参照している。
+- この残作業を #43〜#53 の11件に分けて登録した。これらを先に完了し、#53 で構造変更の到達点を確認してから、#18〜#27 の品質改善・不具合修正へ進む。
+
 ## 到達したい構成
 
-以下は責務の目安。ディレクトリ名は最初の構造 PR で確定する。
+最終パッケージ名はユーザー指定の **`app/`** とする。当初の構成図の `netatwi/` は採用しない。以下は責務の目安であり、実際のディレクトリ移動は #52 の実装時に行う。この計画書の更新時点ではコード・ディレクトリを変更しない。
 
 ```text
-app.py                    # app:app の互換入口と起動のみ
-netatwi/
-  __init__.py              # create_app(config) と Blueprint／CLI 登録
+app.py                    # 直接起動と必要な互換入口
+app/
+  __init__.py              # create_app(config)、app 公開、Blueprint／CLI 登録
   config.py                # 環境設定
   extensions.py            # db, migrate, limiter 等の一度だけの生成
   models/                  # db を共有するモデル定義と全モデルの登録
   routes/                  # auth, contests, posts, voting, results,
                            # profile, admin, news, interactions,
-                           # comments, notifications, tasks
+                           # comments, notifications, users, tasks と残る基本 route
   services/                # 認証連携、投稿・画像、投票、集計、
-                           # 大会ライフサイクル、通知、統計
+                           # 大会ライフサイクル、通知、統計、コメント、
+                           # 交流、プロフィール、ユーザー、ニュース等
   integrations/            # X API、R2、Cloud Tasks の境界
   cli/                     # process-contests, update-user-stats
 tests/
@@ -42,7 +53,11 @@ tests/
   integration/
 ```
 
-routes は HTTP 入力・セッションの読み取り、service 呼び出し、HTTP 応答への変換を担当する。services は大会期間や権限に関わる判断、集計、DB 更新の単位、外部処理の調整を担当する。DB と外部サービスの依存は差し替え可能にし、循環 import を作らない。モデルは永続化定義と単純な値変換に絞る。`create_app` を導入しても、移行期間は `app.py` から `app` と必要な互換名を公開する。
+routes は HTTP 入力・セッションの読み取り、service 呼び出し、HTTP 応答への変換を担当する。services は大会期間や権限に関わる判断、取得・集計、DB 更新の単位、外部処理の調整を担当する。DB と外部サービスの依存は差し替え可能にし、services から routes への依存や循環 import を作らない。モデルは永続化定義と単純な値変換に絞る。
+
+現在の `blueprints/` は内容を `app/routes/` に移し、旧配置に処理本体を残さない。共通フック・ヘルパーも責務に応じて `app/` 配下へ配置する。Blueprint による URL 登録は維持する。`tests/unit/`・`tests/api/`・`tests/integration/` への整理は #53 で行う。
+
+`app.py` と `app/` が同名になるため、#52 では import 解決を確認し、`app:app`、`from app import app, create_app, db`、必要な互換 helper、Flask CLI、`python app.py` と補助スクリプトの入口を保つ。必要な旧 import は薄い再公開で維持し、モデル・db・app・処理本体を二重に生成／定義しない。static／uploads のパス、設定・拡張機能・hook の初期化順と回数も配置変更前の挙動を保つ。
 
 ## Issue と PR の実施順
 
@@ -59,20 +74,64 @@ routes は HTTP 入力・セッションの読み取り、service 呼び出し�
 | 7 | 大会・投稿・プロフィール route の移動 | 大会一覧／詳細、投稿 CRUD、プロフィールを Blueprint に移す。 | SQL・表示条件・画像処理を改善しない。API 契約が同等。 |
 | 8 | 投票・結果・交流 route の移動 | 投票、結果、ブックマーク、いいね、コメント、通知、ユーザー一覧を Blueprint に移す。 | 集計式・投票条件・カウンタ処理を改善しない。API 契約が同等。 |
 | 9 | tasks・CLI の分割 | Cloud Tasks ハンドラと 2 つの CLI コマンドを専用モジュールへ移す。 | 通知タイミング、冪等性、コミット回数を変えない。CLI 名と task URL を維持。 |
-| 10 | services 層への移動 | route／CLI にあるビジネス処理を領域ごとに services へ**そのまま**抽出する。投稿・画像、投票、集計、大会ライフサイクル、通知・統計、認証連携を小 PR に分ける。 | 抽出 PR ではロジックの最適化・不具合修正をしない。route を薄くし、特性テストを通す。 |
-| 11 | 品質改善 | 10 までの後に、重複した判定やシリアライズ、例外・ログ、入力検証、トランザクション境界、型・lint を対象別 Issue で改善する。修正ごとに再現テストを追加する。 | ファイル分割を含めない。意図した変更以外の API 契約を維持する。 |
-| 12 | 運用上の不具合・安全性 | 別 Issue で優先度を付け、例えば task ハンドラの呼出元認証、OAuth 時のヘッダ／セッションログ、投票対象の大会確認、画像と DB の整合性、削除時の参照整合性を調査・修正する。 | 構造変更と混ぜない。仕様変更やデータ移行が必要ならその内容と影響を個別 PR に書く。 |
+| 10 | services 層への移動と構成整理 | #12〜#17 の抽出に続き、#43〜#49 で残る route のビジネス処理を services へ**そのまま**抽出する。#50〜#52 で共通依存・factory・`app/` 配下への配置を整理し、#53 でテスト配置と全体の完了を確認する。 | ロジックの最適化・不具合修正をしない。元ソース・AST の比較と特性テストを通し、最終配置と起動・import 互換を確認する。 |
+| 11 | 品質改善 | #53 完了後に #18〜#22 等で、重複した判定やシリアライズ、例外・ログ、入力検証、トランザクション境界、型・lint を対象別 Issue で改善する。修正ごとに再現テストを追加する。 | ファイル分割を含めない。意図した変更以外の API 契約を維持する。 |
+| 12 | 運用上の不具合・安全性 | #53 完了後に #23〜#27 で優先度を付け、task ハンドラの呼出元認証、OAuth 時のヘッダ／セッションログ、投票対象の大会確認、画像と DB の整合性、削除時の参照整合性を調査・修正する。 | 構造変更と混ぜない。仕様変更やデータ移行が必要ならその内容と影響を個別 PR に書く。 |
 
 順 6〜8 は実際の差分が大きければさらに分割する。順 10 の service 抽出も領域ごとに独立した PR とし、「ファイル移動」と「ロジック改善」を同一 PR にしない。現在の挙動を固定すると危険な点は、特性テストにその事実を記録し、修正 Issue を別に起こす。
 
+### 順 10 の追加 Issue（#43〜#53）
+
+番号順を基本とし、各 Issue の依存先の取り込みを確認して着手する。いずれも取り込み先は `master`。#43〜#49 の抽出を終えてから共通依存・factory・配置を整理し、テスト配置と最終監査を行う。
+
+| 順 | Issue | 作業範囲 | 依存 |
+| --- | --- | --- | --- |
+| 10-1 | [#43 コメント処理を services 層へ抽出する](https://github.com/Megane14916/netatwi-backend/issues/43) | 一覧・追加・編集・削除、重複・所有者・審査員判定、カウンタ更新。既存の通知 service を元の位置で呼ぶ。 | #10、#17 |
+| 10-2 | [#44 いいね・ブックマーク処理を services 層へ抽出する](https://github.com/Megane14916/netatwi-backend/issues/44) | 条件判定、既存行・追加／削除・件数取得、IntegrityError を含む各経路。 | #10、#17 |
+| 10-3 | [#45 大会一覧・詳細・管理一覧の取得処理を services 層へ抽出する](https://github.com/Megane14916/netatwi-backend/issues/45) | 期間別分類、最新結果・予選情報、並び順・表示データ、既存キャッシュ。 | #9、#16 |
+| 10-4 | [#46 大会別投稿一覧の取得処理を services 層へ抽出する](https://github.com/Megane14916/netatwi-backend/issues/46) | 投稿・閲覧者の投票・コメント情報、投稿者数、表示データ構築。 | #9、#13、#14 |
+| 10-5 | [#47 プロフィールの取得・表示データ構築を services 層へ抽出する](https://github.com/Megane14916/netatwi-backend/issues/47) | 投稿・ブックマーク・いいねの取得、公開期間判定、結果・審査員賞・閲覧者情報の組み合わせ。 | #9、#15、#46 |
+| 10-6 | [#48 ニュースの取得・追加・削除処理を services 層へ抽出する](https://github.com/Megane14916/netatwi-backend/issues/48) | 公開／管理一覧、投稿 ID／URL の解析、追加・削除。 | #8 |
+| 10-7 | [#49 ユーザー一覧・アカウント処理を抽出し、残る API を Blueprint に移す](https://github.com/Megane14916/netatwi-backend/issues/49) | ユーザー検索・ページング・統計表示、退会処理。me・logout・退会・トップの route を移す。 | #10、#12、#17 |
+| 10-8 | [#50 共通ヘルパーを移し、services 層から Blueprint への依存を解消する](https://github.com/Megane14916/netatwi-backend/issues/50) | 文字数計算、画像設定・helper、logger・scheduler の接続。遅延参照・差し替え・必要な互換名を保持する。 | #43〜#49 |
+| 10-9 | [#51 application factory と登録処理を集約し、app.py を互換入口にする](https://github.com/Megane14916/netatwi-backend/issues/51) | アプリ生成・Blueprint／CLI 登録・初期化を集約し、既定 app の URL map から不足 route を補う方式を整理する。 | #49、#50 |
+| 10-10 | [#52 バックエンドを app パッケージへ集約し、Blueprint を routes 配下に移す](https://github.com/Megane14916/netatwi-backend/issues/52) | `app/` 配下への機械的移動、`blueprints/` から `app/routes/` への移動、import と必要な再公開の調整。 | #50、#51 |
+| 10-11 | [#53 テストを unit・api・integration に整理し、構造リファクタリングの完了を確認する](https://github.com/Megane14916/netatwi-backend/issues/53) | テスト・fixture・snapshot の配置、CI 収集、計画書・実行手順・検証記録の整合と全体監査。#18〜#27 の前提も更新する。 | #52 |
+
+### 構造リファクタリングの完了条件
+
+- route は HTTP／セッション入力、service 呼び出し、応答変換を担当し、対象の取得・判断・更新処理を service へ移している。
+- service が route モジュールを import せず、循環 import・処理本体の二重定義・db／モデル／app の二重生成・route／CLI の二重登録がない。
+- 本体は `app/models/`・`app/routes/`・`app/services/`・`app/integrations/`・`app/cli/` と設定・拡張機能・共通モジュールへ配置され、`app.py` は直接起動と必要な互換入口に絞られている。旧配置に必要な再公開が残る場合は、その対象と理由を記録する。
+- `tests/unit/`・`tests/api/`・`tests/integration/` の収集・共有 fixture・snapshot・fake が機能する。分類のためにテストの期待値を変更したり、削除・skip したりしない。
+- ソース・AST 比較と全テスト、URL map、WSGI・CLI・直接起動・補助スクリプトの import、モデル契約・Alembic 差分ゼロを確認し、#53 で記録する。API・SQL・判定・副作用・commit／rollback・例外境界の改善はこの工程に含めない。
+
+## 挙動を保つ service 抽出の手順
+
+#12〜#17 で行った抽出・検証を、#43〜#53 でも作業内容に応じて引き継ぐ。特に、直近の #16・#17 では以下を実施した。
+
+1. **基準を固定し、移動前にテストする。** 最新の `master` から分岐し、比較するコミット SHA と元ファイルを記録する。既存テストを実行し、対象の正常・異常、権限・期間境界、再実行、DB と外部副作用、commit／rollback の順序・回数の特性テストを追加する。追加テストが元コードで成功してから最初のコミットに保存する。期待値は現在の挙動に合わせ、不具合の修正を混ぜない。
+2. **元ソースから機械的に切り出す。** AST の `lineno`・`end_lineno` 等で対象関数／文の範囲を特定し、コメントを含む元ソースをコピーする。関数本体を `ast.unparse` 等で再生成せず、SQL、条件式、ループ、時刻取得、通知・画像処理、commit／rollback、例外とその順序を保持する。まとめ直し・名前の一括整理・共通化・最適化は行わない。
+3. **接続の変更を最小限にする。** route に HTTP 入力と応答変換を残し、元の位置から service を呼ぶ。必要な引数の受け渡し・import・再公開・外側の `jsonify` の扱いを明示的に調整する。CLI 名・callback・decorator・docstring、互換 helper、設定・logger・scheduler・client cache の解決時点を保つ。テストの固定時刻・外部 client fake は移動先へ接続し、テスト本体・期待値を保持する。
+4. **ソースと AST の両方を比較する。** `git show <基準SHA>:<元ファイル>` で元コードを取得し、抽出範囲のソース（必要なインデント・改行の正規化を除く）と AST を比較する。HTTP 戻り値等の許可した調整だけを比較側にも適用し、それ以外の一致を確認する。nested helper の return や抽出対象外の except まで変更しないよう、変換範囲を抽出した文に限定する。import・定数・引数・呼出元のモジュール全体も確認し、認証・入力・commit・例外境界や他の route に意図しない変更がないことを検証する。
+5. **移動後の契約・副作用を検証する。** 全テスト、URL map、起動・CLI、モデル契約・Alembic 差分を確認し、GitHub Actions の Python 3.11 でも成功を確認する。ソース・AST の一致は許可した構造変換の範囲を確認する手段であり、import 解決・初期化・設定・HTTP／DB／外部副作用の実行テストと併用する。抽出と fake の接続先変更を次のコミットに保存する。
+6. **比較スクリプトと記録を残す。** `docs/refactor/verify_issue_<番号>_extraction.py` と `issue-<番号>-verification.md` に、基準 SHA・元と先の対応・許可した調整・移動前後のテスト結果・残る挙動・実行環境・対象外・戻し方を保存し、次のコミットにする。作業中はこのような検証済みの区切りで定期的にコミットし、PR には最終差分と実施した検証を記載する。
+
+参考となる実施記録:
+
+- [#16 の検証記録](issue-16-verification.md)／[比較スクリプト](verify_issue_16_extraction.py): CRUD・task の HTTP 戻り値だけを調整し、CLI 本体と Cloud Tasks 関数・cache をコピー。呼出元の認証・例外境界・予定作成と fake の接続を比較した。
+- [#17 の検証記録](issue-17-verification.md)／[比較スクリプト](verify_issue_17_extraction.py): 通知5関数の本体を比較し、統計関数は全文ソース・AST の一致を確認。route／CLI の接続、時刻 fake の変更、追加テストと他の既存 Python ファイルの保持を確認した。
+
+各比較スクリプトは、その Issue の抽出時点と固定した基準を対象とする。後続 Issue が同じファイルを移動・変更した場合は新しい基準と対応表を用い、古い検証記録を現在の全体検証と混同しない。
+
 ## テスト方針と各段階のゲート
 
-- **unit**: 文字数計算、期間判定、採点方式、同点順位、進出判定、通知イベント判定、ユーザー統計の順位。時刻は固定し、DB が不要な計算は純粋関数へ移した後に個別テストする。
+- **unit**: 既に DB・HTTP・外部サービスを必要としない文字数計算等を個別に検証する。期間判定・採点・順位等は依存に応じて API／integration で特性を固定する。テスト分類のための純粋関数化・アルゴリズム再設計は構造変更に混ぜず、必要なら後の品質改善 Issue で扱う。
 - **API**: Flask test client で匿名／一般／審査員／管理者を用意。投稿・投票・審査員賞・集計結果・プロフィール・コメント・ブックマーク・通知・管理の HTTP 契約を確認する。境界時刻、0 点、同点、空データ、同じリクエストの再実行を含める。
 - **integration**: テスト DB 上で model metadata、制約、カウンタと行データ、commit／rollback、Cloud Tasks と CLI の経路を確認する。PostgreSQL 固有の SQL・型・制約に依存する箇所は CI で PostgreSQL の検証枠を設ける。
 - **外部サービス**: X OAuth、R2、Cloud Tasks は固定レスポンスの fake／mock を使い、認可 state とセッション、アップロード／削除、タスクの URL と予定時刻を検証する。実サービスの資格情報を CI に要求しない。
 - **実行環境**: ローカルでは Dockerfile に合わせた Python 3.11 の仮想環境を作り、`requirements.txt` を入れて `python -m pytest -q` を実行する方法を基本とする。最初のテストは `app` の import 前にテスト用 URI を環境変数へ設定し、一時 SQLite DB で実行する。順 4 の後は `create_app` にテスト設定を渡す。GitHub Actions でも Python 3.11 と一時 SQLite DB を使い、最初のテスト追加 PR から毎回実行する。PostgreSQL 固有の挙動や migration を検証する段階では、別途 GitHub Actions の PostgreSQL service container を使うテストを追加する。
-- **構造変更 PR の必須確認**: `pytest` 全件、URL map の差分、`app:app` での起動、CLI 名、全モデルの metadata、Alembic の schema diff。route の差分は入力と出力・副作用が等価であることをレビューする。
+- **構造変更 PR の必須確認**: service 抽出・配置変更の元ソースと AST の比較、`git diff --check`、`pytest` 全件、URL map の差分、`app:app` での起動、CLI 名、全モデルの metadata、Alembic の schema diff。route の差分は入力と出力・副作用が等価であることをレビューする。配置統一では直接起動・補助スクリプトの import、static／uploads の位置、拡張機能・モデルの一度だけの登録も確認する。
 - **挙動変更 PR の必須確認**: 変更前に失敗する再現テスト、変更後の全件テスト、API・DB・運用への影響、必要な移行／ロールバック手順。品質ツールは最初に既存警告の範囲を記録し、以降は変更箇所から段階的に適用する。
 
 ## Issue・ブランチ・PR の運用
@@ -82,6 +141,7 @@ routes は HTTP 入力・セッションの読み取り、service 呼び出し�
 3. 1 ブランチは 1 Issue の目的に絞り、1 PR で取り込む。積み重ねが必要な場合は依存 PR を明記し、前段の取り込み後に取り込み先へ追従させる。構造変更 PR と挙動変更 PR を混ぜない。レビューしやすい差分の大きさを優先する。
 4. PR 説明には `Closes #番号`、変更内容、**やってないこと**、影響する API／DB／外部サービス、テスト結果、残るリスク、必要なデプロイ順と戻し方を書く。Issue は「やること／やらないこと／受け入れ条件」を持つ。PR の「やってないこと」は実際の差分と照合し、単に予定を書き写さない。
 5. 最初のテスト追加と同じ PR で GitHub Actions を導入する。その PR 以降は Actions の成功とレビューを取り込み条件にする。リファクタリング中は各 PR の取り込み後にもテストを実行し、問題が出たらその PR 単位で戻せる状態を保つ。実 DB の migration や本番設定変更は別 PR・別手順として扱う。
+6. 作業中は移動前の特性テスト、検証済みの抽出・接続変更、比較スクリプトと記録等の区切りで定期的にコミットする。コミット数を固定することより、元の挙動と完成した差分をレビュー・revert できることを優先する。
 
 ### Issue 記述例（API 移動）
 
@@ -106,5 +166,6 @@ Closes #<Issue 番号>
 
 - `master` の保護ルールと既存の未取り込み PR。GitHub Actions は最初のテスト追加 PR で設定する。
 - API 契約を変える個別 Issue に限り、フロントエンドが呼ぶ URL・メソッドと参照するレスポンス項目を確認し、必要なら両リポジトリのリリース順を決める。構造変更だけの PR では API 契約を維持するため、互換期間は設定しない。
-- ローカルの Python 3.11 仮想環境と GitHub Actions 上の Python 3.11／一時 SQLite DB を実行可能にする。現環境では Python 起動に失敗したため、計画の順 1 の完了までテスト結果を成功と扱わない。
+- ローカルと GitHub Actions の一時 SQLite・外部通信隔離を確認する。#12〜#17 のローカル検証では一時仮想環境 `netatwi-issue3-venv` の Python 3.12.14 を使い、Python 3.11 は GitHub Actions で確認した。Dockerfile に合わせた Python 3.11 を基本とし、ローカルで異なる版を使う場合はその版と制約を検証記録に残す。
+- #43〜#53 の依存先の取り込みを確認する。#18〜#27 は構造変更の完了後に着手し、#53 で既存 Issue の前提・計画書・実コードの整合を確認する。
 - 本番 DB の migration 履歴と Cloud Tasks の認証／再試行設定。構造変更では本番データを書き換えず、挙動修正の Issue で必要性を判断する。
