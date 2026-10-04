@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from flask import jsonify, request, session
 from sqlalchemy.exc import IntegrityError
 
-from models import Bookmark, Notification, Post, Vote, db
+from models import Bookmark, Post, Vote, db
+from services import notifications as notifications_service
 from .legacy import LegacyEndpointBlueprint
 
 
@@ -123,15 +124,7 @@ def set_like(post_id):
             )
             db.session.add(new_vote)
             # 通知生成
-            if user_id != post.user_id:
-                notification = Notification(
-                    user_id=post.user_id,
-                    sender_id=user_id,
-                    type="like",
-                    post_id=post_id,
-                    contest_id=c.id,
-                )
-                db.session.add(notification)
+            notifications_service.create_like_notification(post, post_id, user_id, c)
 
         db.session.commit()
 
