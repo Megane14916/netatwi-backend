@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
 from app_factory import create_base_app
+import runtime_dependencies
 from services import results as results_service
 from integrations import images as image_storage
 from integrations import cloud_tasks
@@ -32,14 +33,7 @@ is_local_dev = runtime_settings.is_local_dev
 logger = logging.getLogger(__name__)
 JST = timezone(timedelta(hours=9), "JST")
 
-UPLOAD_FOLDER = "static/uploads"
-ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-# R2設定
-USE_R2 = os.environ.get("USE_R2", "False").lower() == "true"
-R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME")
-R2_PUBLIC_URL = os.environ.get("R2_PUBLIC_URL", "").rstrip("/")
+(UPLOAD_FOLDER, ALLOWED_EXTENSIONS, USE_R2, R2_BUCKET_NAME, R2_PUBLIC_URL) = image_storage.initialize_image_settings()
 
 
 def get_r2_client():
@@ -99,25 +93,7 @@ def get_cached_contest_results(contest_id):
 
 
 # --- 文字数カウントロジック (追加) ---
-def calculate_weighted_length(text):
-    if not text:
-        return 0
-
-    # 改行コードの正規化: \r\n -> \n, \r -> \n
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-
-    url_pattern = re.compile(r"https?://[\w/:%#\$&\?\(\)~\.=\+\-]+")
-    processed_text = url_pattern.sub("x" * 23, text)
-
-    length = 0
-    for char in processed_text:
-        code = ord(char)
-        if (0x00 <= code <= 0x80) or (code == 0xF8F0) or (0xFF61 <= code <= 0xFF9F):
-            length += 1
-        else:
-            length += 2
-
-    return length
+from services.text import calculate_weighted_length
 
 
 
@@ -147,18 +123,7 @@ from cli import process_contests_command, register_cli, update_user_stats
 def _register_extracted_routes(application):
     # Resolve the scheduler from this module when a request runs. Existing
     # integrations and test fakes can continue replacing it on app.py.
-    application.extensions["schedule_contest_task"] = (
-        lambda *args: schedule_contest_task(*args)
-    )
-    application.extensions["legacy_route_helpers"] = {
-        "get_route_logger": lambda: logger,
-        "allowed_file": lambda *args: allowed_file(*args),
-        "calculate_weighted_length": lambda *args: calculate_weighted_length(*args),
-        "save_file": lambda *args: save_file(*args),
-        "delete_file": lambda *args: delete_file(*args),
-        "get_cached_contest_results": lambda *args: get_cached_contest_results(*args),
-        "generate_contest_results": lambda *args: generate_contest_results(*args),
-    }
+    runtime_dependencies.register_helper_bindings(application, globals())
     for blueprint in BLUEPRINTS:
         application.register_blueprint(blueprint)
 

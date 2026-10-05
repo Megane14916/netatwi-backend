@@ -7,7 +7,7 @@ and retains HTTP responses and the exception/rollback boundary.
 import time
 from datetime import datetime, timezone
 
-from blueprints.dependencies import calculate_weighted_length, route_logger as logger
+from runtime_dependencies import calculate_weighted_length, route_logger as logger
 from models import Contest, Post, Vote, db
 
 
