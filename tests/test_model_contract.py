@@ -4,7 +4,7 @@ import json
 from importlib import import_module
 from pathlib import Path
 
-import models
+import app.models as models
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from sqlalchemy import create_engine
@@ -95,7 +95,7 @@ def test_all_models_are_exported_and_registered():
 
 def test_each_model_module_uses_the_shared_db():
     for name, module_name in MODEL_MODULES.items():
-        module = import_module(f"models.{module_name}")
+        module = import_module(f"app.models.{module_name}")
         assert getattr(module, name) is getattr(models, name)
         assert module.db is models.db
 

@@ -82,4 +82,4 @@ def test_issue_10_handlers_are_registered_from_blueprints(app):
     for application in (production_app, app):
         for module, endpoints in groups.items():
             for endpoint in endpoints:
-                assert application.view_functions[endpoint].__module__ == f"blueprints.{module}"
+                assert application.view_functions[endpoint].__module__ == f"app.routes.{module}"

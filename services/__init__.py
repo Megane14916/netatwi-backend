@@ -1,1 +1,1 @@
-"""Services extracted without changing existing behavior."""
+"""Compatibility namespace for app.services; children are lazy aliases."""

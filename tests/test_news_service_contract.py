@@ -8,8 +8,8 @@ import pytest
 from sqlalchemy import event
 from sqlalchemy.orm import Query
 
-from blueprints import news as routes
-from models import News, db
+from app.routes import news as routes
+from app.models import News, db
 
 
 NOW = datetime(2026, 1, 1, 12)
@@ -36,7 +36,7 @@ def regex_imports(monkeypatch):
     calls = []
 
     def importing(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "re" and globals and globals.get("__name__") in ("blueprints.news", "services.news"):
+        if name == "re" and globals and globals.get("__name__") in ("app.routes.news", "app.services.news"):
             calls.append("re")
         return original(name, globals, locals, fromlist, level)
 

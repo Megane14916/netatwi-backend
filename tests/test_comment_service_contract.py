@@ -5,8 +5,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import event
 
-from models import Comment, Notification, Post, db
-from services import notifications
+from app.models import Comment, Notification, Post, db
+from app.services import notifications
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)

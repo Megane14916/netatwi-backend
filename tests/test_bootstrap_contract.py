@@ -4,7 +4,7 @@ import json
 from datetime import timedelta
 from pathlib import Path
 
-import app_config
+import app.config as app_config
 from app import app as production_app, create_app
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.exceptions import RequestEntityTooLarge

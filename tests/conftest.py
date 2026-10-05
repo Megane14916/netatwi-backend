@@ -30,18 +30,19 @@ os.environ.update(
 )
 
 import app as app_module  # noqa: E402
-from services import notifications as notifications_service  # noqa: E402
-from services import contests as contest_service  # noqa: E402
-from services import interactions as interaction_service  # noqa: E402
-from services import posts as post_service  # noqa: E402
-from services import users as user_service  # noqa: E402
-from services import profile as profile_service  # noqa: E402
-from services import results as results_service  # noqa: E402
-from services import contest_lifecycle  # noqa: E402
-from services import voting as voting_service  # noqa: E402
-from integrations import cloud_tasks, x_oauth  # noqa: E402
+app_module.app  # Resolve the public entry before loading fakes and components.
+from app.services import notifications as notifications_service  # noqa: E402
+from app.services import contests as contest_service  # noqa: E402
+from app.services import interactions as interaction_service  # noqa: E402
+from app.services import posts as post_service  # noqa: E402
+from app.services import users as user_service  # noqa: E402
+from app.services import profile as profile_service  # noqa: E402
+from app.services import results as results_service  # noqa: E402
+from app.services import contest_lifecycle  # noqa: E402
+from app.services import voting as voting_service  # noqa: E402
+from app.integrations import cloud_tasks, x_oauth  # noqa: E402
 from app import db  # noqa: E402
-from models import Contest, User  # noqa: E402
+from app.models import Contest, User  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

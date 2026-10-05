@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from app import db, generate_contest_results, get_cached_contest_results
-from models import Contest, ContestResult, Post, User, Vote
+from app.models import Contest, ContestResult, Post, User, Vote
 
 
 def make_contest(name):

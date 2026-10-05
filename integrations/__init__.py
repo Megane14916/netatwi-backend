@@ -1,1 +1,1 @@
-"""Integrations extracted without changing existing behavior."""
+"""Compatibility namespace for app.integrations; children are lazy aliases."""

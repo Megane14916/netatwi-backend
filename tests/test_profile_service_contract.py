@@ -7,10 +7,10 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy.orm import Query
 
-from blueprints import profile as routes
-from services import profile as query_module
-from services import results as results_service
-from models import Bookmark, ContestResult, Post, Vote, db
+from app.routes import profile as routes
+from app.services import profile as query_module
+from app.services import results as results_service
+from app.models import Bookmark, ContestResult, Post, Vote, db
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
@@ -27,7 +27,7 @@ def clock(monkeypatch, read):
     fake = SimpleNamespace(time=tick)
 
     def local_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "time" and globals and globals.get("__name__") == "blueprints.profile":
+        if name == "time" and globals and globals.get("__name__") == "app.routes.profile":
             return fake
         return original(name, globals, locals, fromlist, level)
 

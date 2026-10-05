@@ -9,10 +9,10 @@ from flask import url_for
 from flask_sqlalchemy.query import Query as FlaskQuery
 from sqlalchemy.orm import Query
 
-from blueprints import account as account_routes
-from services import users as withdrawal_module
-from blueprints import users as directory_routes
-from models import Bookmark, Comment, ContestResult, Notification, Post, User, UserStats, Vote, db
+from app.routes import account as account_routes
+from app.services import users as withdrawal_module
+from app.routes import users as directory_routes
+from app.models import Bookmark, Comment, ContestResult, Notification, Post, User, UserStats, Vote, db
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
@@ -93,13 +93,13 @@ def test_lazy_imports_precede_input_and_pagination(client, monkeypatch):
     original_paginate = FlaskQuery.paginate
 
     def importing(name, globals=None, locals=None, fromlist=(), level=0):
-        if globals and globals.get("__name__") in ("blueprints.users", "services.users") and name in ("models", "sqlalchemy"):
+        if globals and globals.get("__name__") in ("app.routes.users", "app.services.users") and name in ("app.models", "sqlalchemy"):
             events.append(name)
         return original_import(name, globals, locals, fromlist, level)
 
     def get(key, default=None, **kwargs):
         events.append(key)
-        assert events[:2] == ["models", "sqlalchemy"]
+        assert events[:2] == ["app.models", "sqlalchemy"]
         assert (default, kwargs) == (("", {}) if key == "q" else (1, {"type": int}))
         return default
 
@@ -112,7 +112,7 @@ def test_lazy_imports_precede_input_and_pagination(client, monkeypatch):
     monkeypatch.setattr(directory_routes, "request", SimpleNamespace(args=SimpleNamespace(get=get)))
     monkeypatch.setattr(FlaskQuery, "paginate", paginate)
     assert client.get("/api/users").status_code == 200
-    assert events == ["models", "sqlalchemy", "q", "page", "paginate"]
+    assert events == ["app.models", "sqlalchemy", "q", "page", "paginate"]
 
 
 @pytest.mark.parametrize("stage", ("query", "json"))
