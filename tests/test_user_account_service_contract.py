@@ -9,8 +9,8 @@ from flask import url_for
 from flask_sqlalchemy.query import Query as FlaskQuery
 from sqlalchemy.orm import Query
 
-import app as account_routes
-import app as withdrawal_module
+from blueprints import account as account_routes
+from services import users as withdrawal_module
 from blueprints import users as directory_routes
 from models import Bookmark, Comment, ContestResult, Notification, Post, User, UserStats, Vote, db
 

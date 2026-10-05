@@ -120,62 +120,14 @@ def calculate_weighted_length(text):
     return length
 
 
-@app.route("/api/me")
-def get_current_user():
-    user_data = {"logged_in": False}
-    if "user_id" in session:
-        user_data["logged_in"] = True
-        user_data["user"] = {
-            "id": session["user_id"],
-            "screen_name": session["screen_name"],
-            "name": session.get("name"),
-            "profile_image_url": session.get("profile_image_url"),
-            "isAdmin": session["screen_name"]
-            in [
-                s.strip()
-                for s in os.environ.get(
-                    "ADMIN_SCREEN_NAMES", "dummy_admin1,dummy_admin2"
-                ).split(",")
-                if s.strip()
-            ],
-        }
-        # --- ▼▼▼ set ではなく list を使うように修正 ▼▼▼ ---
-        # セッションから 'judge_for_contest_ids' をリストとして取得 (なければ空のリスト)
-        judge_contest_ids = session.get("judge_for_contest_ids", [])
-        user_data["judge_contests"] = judge_contest_ids  # リストをそのまま返す
-        # --- ▲▲▲ ここまで ▲▲▲ ---
-    return jsonify(user_data)
-
-
-@app.route("/api/logout")
-def logout():
-    session.clear()
-    return jsonify({"message": "Logged out successfully"})
-
-
-@app.route("/api/users/me", methods=["DELETE"])
-def withdraw_user():
-    if "user_id" not in session:
-        return jsonify({"error": "Login required"}), 401
-
-    user_id = session["user_id"]
-    user = User.query.get(user_id)
-    if not user:
-        return jsonify({"error": "User not found"}), 404
-
-    user.deleted_at = datetime.now(timezone.utc)
-    db.session.commit()
-
-    session.clear()
-    return jsonify({"message": "退会処理が完了しました"})
 
 
 
 
-# --- Mock API Endpoints ---
-@app.route("/")
-def index():
-    return "ネタツイ大会バックエンド"
+
+
+
+
 
 
 # --- Cloud Tasks Integration ---
@@ -186,6 +138,8 @@ def schedule_contest_task(contest_id, event_type, schedule_time):
 
 
 from blueprints import BLUEPRINTS
+from blueprints.account import get_current_user, logout, withdraw_user
+from blueprints.core import index
 from blueprints.tasks import handle_contest_task
 from cli import process_contests_command, register_cli, update_user_stats
 
