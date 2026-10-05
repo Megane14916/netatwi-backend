@@ -1,0 +1,41 @@
+{
+  "baseline": "23dbc5bc8acbc070bbfdacc63626e45a55c0e184",
+  "python": "3.11.16",
+  "collection": {
+    "count": 645,
+    "normalized_nodeids_sha256": "a1c953ebde87f55a0a32e8c88b23396f500b76945032bfdb65264c5e7d32a4b1",
+    "per_file": {
+      "tests/test_api_access.py": 24,
+      "tests/test_api_activity.py": 11,
+      "tests/test_application_factory_contract.py": 8,
+      "tests/test_auth_characterization.py": 22,
+      "tests/test_blueprint_contract.py": 2,
+      "tests/test_bootstrap_contract.py": 5,
+      "tests/test_comment_service_contract.py": 39,
+      "tests/test_contest_jobs.py": 6,
+      "tests/test_contest_lifecycle_contract.py": 22,
+      "tests/test_contest_post_profile_contract.py": 2,
+      "tests/test_contest_post_query_service_contract.py": 38,
+      "tests/test_contest_query_service_contract.py": 38,
+      "tests/test_external_boundaries.py": 4,
+      "tests/test_interaction_service_contract.py": 54,
+      "tests/test_model_contract.py": 5,
+      "tests/test_news_service_contract.py": 72,
+      "tests/test_notification_stats_contract.py": 14,
+      "tests/test_package_alias_contract.py": 7,
+      "tests/test_package_entry_contract.py": 15,
+      "tests/test_post_service_contract.py": 29,
+      "tests/test_post_vote_effects.py": 4,
+      "tests/test_profile_service_contract.py": 47,
+      "tests/test_results_service_contract.py": 16,
+      "tests/test_routes.py": 2,
+      "tests/test_scoring.py": 2,
+      "tests/test_scoring_characterization.py": 6,
+      "tests/test_shared_helper_contract.py": 34,
+      "tests/test_tasks_cli_contract.py": 16,
+      "tests/test_user_account_service_contract.py": 54,
+      "tests/test_voting_results_interactions_contract.py": 8,
+      "tests/test_voting_service_contract.py": 39
+    }
+  }
+}

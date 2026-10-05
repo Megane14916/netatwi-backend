@@ -20,24 +20,27 @@
 - `migrations/` は `.gitignore` に指定されている。既存の追跡ファイルはあるが、新しい revision の扱いはスキーマ変更 Issue で明示する。モデル分割 PR は migration 不要・自動生成差分ゼロを条件とする。
 - 調査環境の `venv` と `py` ランチャーは Python プロセスを起動できず、現時点で pytest の実行結果は取得できていない。最初の Issue で再現可能な Python 環境と実行手順を確立する。
 
-## 現在の進捗と残作業（2026-10-04 更新）
+## 現在の進捗と次の工程（2026-10-05 更新）
 
-- #3〜#11 のテスト・起動・モデル・Blueprint・CLI の分割と、#12〜#17 の認証、投稿・画像、投票、結果、大会ライフサイクル、通知・統計の service 抽出を取り込み済み。
-- 直近の #17／PR #42 の検証記録では、移動前の既存テスト225件、追加した特性テスト14件、移動後の全テスト239件が成功し、GitHub Actions の Python 3.11 でも成功した。詳細は [issue-17-verification.md](issue-17-verification.md) を参照する。
-- #12〜#17 の完了は、全 route の service 抽出と最終配置の完了を意味しない。コメント・いいね・ブックマークの本体、大会・投稿・プロフィール・ユーザー・ニュースの参照／更新処理、退会処理などが route 内に残っている。
-- 現在は `blueprints/`、`models/`、`services/`、`integrations/`、`cli/` がリポジトリ直下にある。`app.py` に4つの route、文字数計算、factory・登録処理が残り、一部 service は `blueprints.dependencies` を参照している。
-- この残作業を #43〜#53 の11件に分けて登録した。これらを先に完了し、#53 で構造変更の到達点を確認してから、#18〜#27 の品質改善・不具合修正へ進む。
+- #3〜#17に続き、#43〜#52／PR #55〜#64を取り込み済み。コメント、交流、大会・投稿・プロフィール・ニュース・ユーザーの取得／更新と退会処理をserviceへ抽出し、全35 routeをBlueprintへ移した。
+- #50でservicesからBlueprintへの共通依存を解消し、#51でfactory・登録処理を集約した。#52で58実装を `app/` 配下へ配置し、既存全テスト645件がローカル・GitHub Actionsで成功した。詳細は [#52検証記録](issue-52-verification.md) を参照する。
+- #53の本PRではテストをunit/api/integrationへ配置し、同じ645ケース・snapshot・fixture・fakeを維持して全体監査を行う。アプリ本体はマージ済み#52と一致する。[#53検証記録](issue-53-verification.md) と [実行手順](../../tests/README.md) が現在の配置の記録である。
+- #43〜#53の11件の構造工程は、#53のPRのマージで完了とする。その後、#18〜#22の品質改善と#23〜#27の運用上の不具合修正を別Issue/PRで進める。各Issueの前提も#53の完了へ更新する。
+- 既存の権限判定の重複、route側のrollback・例外境界、OAuthログ、投票対象の大会所属、画像・削除の整合性は構造工程で改善していない。これらを構造完了と混同しない。
 
-## 到達したい構成
+## 到達した構成
 
-最終パッケージ名はユーザー指定の **`app/`** とする。当初の構成図の `netatwi/` は採用しない。以下は責務の目安であり、実際のディレクトリ移動は #52 の実装時に行う。この計画書の更新時点ではコード・ディレクトリを変更しない。
+最終パッケージ名はユーザー指定の **`app/`** とする。当初の構成図の `netatwi/` は採用しない。実装は#52、テスト配置は#53で下記の構成へ移した。
 
 ```text
 app.py                    # 直接起動と必要な互換入口
 app/
-  __init__.py              # create_app(config)、app 公開、Blueprint／CLI 登録
+  __init__.py              # create_app、app、登録関数・互換helperの公開
+  factory.py               # アプリ生成、runtime初期化、Blueprint／CLI登録の本体
   config.py                # 環境設定
   extensions.py            # db, migrate, limiter 等の一度だけの生成
+  hooks.py                 # 共通hook、エラーハンドラ
+  runtime_dependencies.py  # アプリの現在のhelper/logger/schedulerへの接続
   models/                  # db を共有するモデル定義と全モデルの登録
   routes/                  # auth, contests, posts, voting, results,
                            # profile, admin, news, interactions,
@@ -48,16 +51,20 @@ app/
   integrations/            # X API、R2、Cloud Tasks の境界
   cli/                     # process-contests, update-user-stats
 tests/
+  conftest.py              # 環境・SQLite・固定時刻・外部fake・通信拒否を共有
   unit/
   api/
   integration/
+  snapshots/               # URL map、DDL、リレーション
 ```
 
 routes は HTTP 入力・セッションの読み取り、service 呼び出し、HTTP 応答への変換を担当する。services は大会期間や権限に関わる判断、取得・集計、DB 更新の単位、外部処理の調整を担当する。DB と外部サービスの依存は差し替え可能にし、services から routes への依存や循環 import を作らない。モデルは永続化定義と単純な値変換に絞る。
 
-現在の `blueprints/` は内容を `app/routes/` に移し、旧配置に処理本体を残さない。共通フック・ヘルパーも責務に応じて `app/` 配下へ配置する。Blueprint による URL 登録は維持する。`tests/unit/`・`tests/api/`・`tests/integration/` への整理は #53 で行う。
+旧 `blueprints/` の内容は `app/routes/` に移し、旧配置には薄いimport再公開だけを残した。models・CLIとflat moduleも同様にcanonical moduleと同じオブジェクトを再公開する。services/integrationsの旧childは遅延aliasで、rootは状態を持たない互換namespaceである。共通フック・ヘルパー接続も `app/` 配下へ配置済み。理由と全対応表は [#52検証記録](issue-52-verification.md) を参照する。
 
-`app.py` と `app/` が同名になるため、#52 では import 解決を確認し、`app:app`、`from app import app, create_app, db`、必要な互換 helper、Flask CLI、`python app.py` と補助スクリプトの入口を保つ。必要な旧 import は薄い再公開で維持し、モデル・db・app・処理本体を二重に生成／定義しない。static／uploads のパス、設定・拡張機能・hook の初期化順と回数も配置変更前の挙動を保つ。
+Pythonのimportでは同名の `app.py` より `app/` が優先される。`app:app`、`from app import app, create_app, db`、必要な互換helper、Flask CLI、`python app.py` と追跡対象の補助スクリプトの入口を検証済み。単独model/service importでアプリを起動しないため、#52以降は裸の `import app` では初期化せず、公開runtime属性を最初に参照した時点で既定appを初期化する。直接起動したappはpackageへ公開し、追加生成を防ぐ。
+
+static/open_resource/instanceの基準は元のリポジトリへ固定し、UPLOAD_FOLDERとディレクトリ作成を保持する。db/migrate/limiterはextensionsに各1個、全10モデルのmetadata・制約・リレーションを保持する。db配置に伴うモデル定義の読込順の調整と公開属性の初期化時点の違いは#52の記録を引き継ぎ、#53で再変更しない。
 
 ## Issue と PR の実施順
 
@@ -98,6 +105,9 @@ routes は HTTP 入力・セッションの読み取り、service 呼び出し�
 | 10-10 | [#52 バックエンドを app パッケージへ集約し、Blueprint を routes 配下に移す](https://github.com/Megane14916/netatwi-backend/issues/52) | `app/` 配下への機械的移動、`blueprints/` から `app/routes/` への移動、import と必要な再公開の調整。 | #50、#51 |
 | 10-11 | [#53 テストを unit・api・integration に整理し、構造リファクタリングの完了を確認する](https://github.com/Megane14916/netatwi-backend/issues/53) | テスト・fixture・snapshot の配置、CI 収集、計画書・実行手順・検証記録の整合と全体監査。#18〜#27 の前提も更新する。 | #52 |
 
+#43〜#52は上の順にPR #55〜#64でマージ済み。#53は本PRでテスト配置と完了監査を行う。
+各完了commit・担当service・現在の契約テストは [#53の全体監査](issue-53-verification.md) に記録する。
+
 ### 構造リファクタリングの完了条件
 
 - route は HTTP／セッション入力、service 呼び出し、応答変換を担当し、対象の取得・判断・更新処理を service へ移している。
@@ -124,6 +134,12 @@ routes は HTTP 入力・セッションの読み取り、service 呼び出し�
 
 各比較スクリプトは、その Issue の抽出時点と固定した基準を対象とする。後続 Issue が同じファイルを移動・変更した場合は新しい基準と対応表を用い、古い検証記録を現在の全体検証と混同しない。
 
+#52までの抽出/比較scriptと記録は歴史的な配置・テスト数を保持する。再確認は該当PRの
+完了commitを別checkoutで行い、現在のパスに合わせて歴史的scriptを書き換えない。
+#53の配置比較は `23dbc5bc8acbc070bbfdacc63626e45a55c0e184` を基準とし、
+`extract_issue_53.py`、`verify_issue_53_extraction.py`、`check_issue_53_collection.py` で行う。
+これらも#53時点の移動専用であり、後続の意図した挙動変更には新たな基準を用意する。
+
 ## テスト方針と各段階のゲート
 
 - **unit**: 既に DB・HTTP・外部サービスを必要としない文字数計算等を個別に検証する。期間判定・採点・順位等は依存に応じて API／integration で特性を固定する。テスト分類のための純粋関数化・アルゴリズム再設計は構造変更に混ぜず、必要なら後の品質改善 Issue で扱う。
@@ -133,6 +149,12 @@ routes は HTTP 入力・セッションの読み取り、service 呼び出し�
 - **実行環境**: ローカルでは Dockerfile に合わせた Python 3.11 の仮想環境を作り、`requirements.txt` を入れて `python -m pytest -q` を実行する方法を基本とする。最初のテストは `app` の import 前にテスト用 URI を環境変数へ設定し、一時 SQLite DB で実行する。順 4 の後は `create_app` にテスト設定を渡す。GitHub Actions でも Python 3.11 と一時 SQLite DB を使い、最初のテスト追加 PR から毎回実行する。PostgreSQL 固有の挙動や migration を検証する段階では、別途 GitHub Actions の PostgreSQL service container を使うテストを追加する。
 - **構造変更 PR の必須確認**: service 抽出・配置変更の元ソースと AST の比較、`git diff --check`、`pytest` 全件、URL map の差分、`app:app` での起動、CLI 名、全モデルの metadata、Alembic の schema diff。route の差分は入力と出力・副作用が等価であることをレビューする。配置統一では直接起動・補助スクリプトの import、static／uploads の位置、拡張機能・モデルの一度だけの登録も確認する。
 - **挙動変更 PR の必須確認**: 変更前に失敗する再現テスト、変更後の全件テスト、API・DB・運用への影響、必要な移行／ロールバック手順。品質ツールは最初に既存警告の範囲を記録し、以降は変更箇所から段階的に適用する。
+
+現在の実行手順は [tests/README.md](../../tests/README.md)。unit 19・api 479・integration 147の
+合計645ケースを共通conftestで収集する。保存型集計やHTTP/CLI混合テストをunit扱いせず、
+分類のためにfixture・期待値・アプリのロジックを変更しない。snapshotはtests/snapshotsに集約した。
+GitHub Actionsの既存 `python -m pytest -q` は全分類を再帰的に収集するため、workflowを変更しない。
+#53のローカル検証はPython 3.11.16で行い、制限環境では `--basetemp` で専用のGit管理外領域を使う。
 
 ## Issue・ブランチ・PR の運用
 
@@ -164,8 +186,8 @@ Closes #<Issue 番号>
 
 ## 着手前に確認する事項
 
-- `master` の保護ルールと既存の未取り込み PR。GitHub Actions は最初のテスト追加 PR で設定する。
+- `master` の保護ルールと既存の未取り込み PR。GitHub Actionsは導入済みで、master向けPRとmasterへのpushでPython 3.11の全テストを実行する。
 - API 契約を変える個別 Issue に限り、フロントエンドが呼ぶ URL・メソッドと参照するレスポンス項目を確認し、必要なら両リポジトリのリリース順を決める。構造変更だけの PR では API 契約を維持するため、互換期間は設定しない。
-- ローカルと GitHub Actions の一時 SQLite・外部通信隔離を確認する。#12〜#17 のローカル検証では一時仮想環境 `netatwi-issue3-venv` の Python 3.12.14 を使い、Python 3.11 は GitHub Actions で確認した。Dockerfile に合わせた Python 3.11 を基本とし、ローカルで異なる版を使う場合はその版と制約を検証記録に残す。
+- ローカルとGitHub Actionsの一時SQLite・外部通信隔離を確認する。#12〜#52のPython 3.12.14は当時の記録であり、#53ではローカルもPython 3.11.16を用意した。Dockerfileに合わせたPython 3.11を基本とし、異なる版や制約は該当検証記録に残す。
 - #43〜#53 の依存先の取り込みを確認する。#18〜#27 は構造変更の完了後に着手し、#53 で既存 Issue の前提・計画書・実コードの整合を確認する。
 - 本番 DB の migration 履歴と Cloud Tasks の認証／再試行設定。構造変更では本番データを書き換えず、挙動修正の Issue で必要性を判断する。

@@ -5,10 +5,10 @@ from importlib import import_module
 from pathlib import Path
 
 import app
-from tests.test_package_entry_contract import run_isolated
+from tests.integration.test_package_entry_contract import run_isolated
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "app"
 
 
