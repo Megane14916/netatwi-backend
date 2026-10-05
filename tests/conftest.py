@@ -34,6 +34,7 @@ from services import notifications as notifications_service  # noqa: E402
 from services import contests as contest_service  # noqa: E402
 from services import interactions as interaction_service  # noqa: E402
 from services import posts as post_service  # noqa: E402
+from services import users as user_service  # noqa: E402
 from services import profile as profile_service  # noqa: E402
 from services import results as results_service  # noqa: E402
 from services import contest_lifecycle  # noqa: E402
@@ -141,6 +142,7 @@ def fixed_time(monkeypatch):
                 return moment.astimezone(tz) if tz else moment.replace(tzinfo=None)
 
         monkeypatch.setattr(app_module, "datetime", FixedDateTime)
+        monkeypatch.setattr(user_service, "datetime", FixedDateTime)
         monkeypatch.setattr(contest_service, "datetime", FixedDateTime)
         monkeypatch.setattr(post_service, "datetime", FixedDateTime)
         monkeypatch.setattr(profile_service, "datetime", FixedDateTime)

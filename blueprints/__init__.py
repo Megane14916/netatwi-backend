@@ -1,5 +1,7 @@
 """Route groups extracted from app.py."""
 
+from .account import bp as account_bp
+from .core import bp as core_bp
 from .admin import bp as admin_bp
 from .auth import bp as auth_bp
 from .comments import bp as comments_bp
@@ -16,6 +18,8 @@ from .voting import bp as voting_bp
 
 
 BLUEPRINTS = (
+    account_bp,
+    core_bp,
     auth_bp,
     admin_bp,
     news_bp,
