@@ -1,6 +1,6 @@
 """Characterize helper behavior and the live compatibility bindings before #50."""
 
-import runpy
+import importlib.util
 from unittest.mock import Mock
 
 import pytest
@@ -149,7 +149,10 @@ def test_image_settings_initialize_once_in_original_order(monkeypatch, use_r2, e
     monkeypatch.setattr(app_factory, "create_base_app", base)
     monkeypatch.setattr(app_module.os.environ, "get", get)
     monkeypatch.setattr(app_module.os, "makedirs", lambda path, exist_ok: events.append((path, exist_ok)))
-    loaded = runpy.run_path("app.py", run_name="issue50_entry")
+    spec = importlib.util.spec_from_file_location("issue50_entry", "app.py")
+    entry = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(entry)
+    loaded = entry.__dict__
     assert events == ["base", ("static/uploads", True), "USE_R2", "R2_BUCKET_NAME", "R2_PUBLIC_URL"]
     assert loaded["UPLOAD_FOLDER"] == "static/uploads"
     assert loaded["ALLOWED_EXTENSIONS"] == {"png", "jpg", "jpeg", "gif", "webp"}
@@ -160,7 +163,7 @@ def test_image_settings_initialize_once_in_original_order(monkeypatch, use_r2, e
     events.clear()
     application = loaded["create_app"]({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:"})
     assert events == ["base"]
-    namespace = loaded["create_app"].__globals__
+    namespace = entry.__dict__
     replacement = Mock(return_value="late")
     namespace["save_file"] = replacement
     with application.app_context():
