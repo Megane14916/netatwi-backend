@@ -7,9 +7,9 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy.orm import Query
 
-from blueprints import posts as routes
-from services import contest_posts as query_module
-from models import Comment, Post, Vote, db
+from app.routes import posts as routes
+from app.services import contest_posts as query_module
+from app.models import Comment, Post, Vote, db
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
@@ -26,7 +26,7 @@ def clock(monkeypatch, read):
     fake = SimpleNamespace(time=tick)
 
     def local_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "time" and globals and globals.get("__name__") == "blueprints.posts":
+        if name == "time" and globals and globals.get("__name__") == "app.routes.posts":
             return fake
         return original(name, globals, locals, fromlist, level)
 

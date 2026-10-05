@@ -2,7 +2,7 @@
 
 from flask import jsonify, request
 
-from services import users as user_service
+from app.services import users as user_service
 from .legacy import LegacyEndpointBlueprint
 
 

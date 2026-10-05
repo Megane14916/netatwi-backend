@@ -5,7 +5,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from app import app, db
-from models import Post, Comment
+from app.models import Post, Comment
 
 def sync_comment_counts():
     print("コメント数の同期処理を開始します...")

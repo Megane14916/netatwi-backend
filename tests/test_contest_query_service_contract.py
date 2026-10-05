@@ -8,10 +8,10 @@ import pytest
 from sqlalchemy.orm import Query
 
 from app import create_app
-from blueprints import admin as admin_routes
-from blueprints import contests as public_routes
-from services import contests as query_module
-from models import Contest, ContestResult, Post, db
+from app.routes import admin as admin_routes
+from app.routes import contests as public_routes
+from app.services import contests as query_module
+from app.models import Contest, ContestResult, Post, db
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
@@ -30,7 +30,7 @@ def clock(monkeypatch, read):
     fake = SimpleNamespace(time=get_time)
 
     def import_clock(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "time" and globals and globals.get("__name__") in ("blueprints.contests", "services.contests"):
+        if name == "time" and globals and globals.get("__name__") in ("app.routes.contests", "app.services.contests"):
             return fake
         return original_import(name, globals, locals, fromlist, level)
 

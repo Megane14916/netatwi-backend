@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app import db, generate_contest_results, get_cached_contest_results
-from models import ContestResult, Post, Vote
+from app.models import ContestResult, Post, Vote
 
 
 PAST = datetime(2025, 1, 1, tzinfo=timezone.utc)

@@ -2,7 +2,7 @@
 
 from flask import jsonify, request, session
 
-from services import comments as comments_service
+from app.services import comments as comments_service
 from .legacy import LegacyEndpointBlueprint
 
 

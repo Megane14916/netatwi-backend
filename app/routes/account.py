@@ -3,7 +3,7 @@
 import os
 
 from flask import jsonify, session
-from services import users as user_service
+from app.services import users as user_service
 from .legacy import LegacyEndpointBlueprint
 
 

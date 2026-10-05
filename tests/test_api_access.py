@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app import db
-from models import Contest, User
+from app.models import Contest, User
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)

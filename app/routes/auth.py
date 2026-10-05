@@ -5,9 +5,9 @@ import traceback
 
 from flask import current_app, jsonify, redirect, request, session
 
-from app_extensions import limiter
-from models import db
-from services import auth as auth_service
+from app.extensions import limiter
+from app.models import db
+from app.services import auth as auth_service
 from .legacy import LegacyEndpointBlueprint
 
 

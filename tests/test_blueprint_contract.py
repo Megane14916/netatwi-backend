@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 
 from app import db
-from models import Contest, News
+from app.models import Contest, News
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)

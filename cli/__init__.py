@@ -1,12 +1,9 @@
-"""Register the extracted commands on each Flask application."""
+"""Compatibility alias for app.cli; no processing bodies live here."""
 
-from .process_contests import process_contests_command
-from .user_stats import update_user_stats
+from importlib import import_module
+import sys
 
-
-COMMANDS = (process_contests_command, update_user_stats)
-
-
-def register_cli(application):
-    for command in COMMANDS:
-        application.cli.add_command(command)
+_target = import_module("app.cli")
+sys.modules[__name__ + ".process_contests"] = import_module("app.cli.process_contests")
+sys.modules[__name__ + ".user_stats"] = import_module("app.cli.user_stats")
+sys.modules[__name__] = _target

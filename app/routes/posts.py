@@ -5,9 +5,9 @@ from datetime import timedelta, timezone
 
 from flask import jsonify, request, session
 
-from models import db
-from services import posts as post_service
-from services import contest_posts as contest_post_service
+from app.models import db
+from app.services import posts as post_service
+from app.services import contest_posts as contest_post_service
 from .legacy import LegacyEndpointBlueprint
 
 

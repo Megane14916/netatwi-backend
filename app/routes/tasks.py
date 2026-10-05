@@ -2,7 +2,7 @@
 
 from flask import jsonify
 
-from services import contest_lifecycle
+from app.services import contest_lifecycle
 from .legacy import LegacyEndpointBlueprint
 
 

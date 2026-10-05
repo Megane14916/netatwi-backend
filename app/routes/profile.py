@@ -4,7 +4,7 @@ import traceback
 
 from flask import jsonify, session
 
-from services import profile as profile_service
+from app.services import profile as profile_service
 from .legacy import LegacyEndpointBlueprint
 
 

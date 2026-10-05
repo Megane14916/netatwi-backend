@@ -2,7 +2,7 @@
 
 from flask.cli import AppGroup
 
-from services import user_stats as user_stats_service
+from app.services import user_stats as user_stats_service
 
 
 cli = AppGroup()

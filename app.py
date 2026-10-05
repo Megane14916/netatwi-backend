@@ -1,9 +1,11 @@
 """Application compatibility exports and direct server entry."""
 
-from app_factory import initialize_application
+from app.factory import initialize_application
+from app import _publish_entry
 
 
 initialize_application(globals())
+_publish_entry(globals())
 
 
 if __name__ == "__main__":

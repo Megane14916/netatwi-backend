@@ -6,9 +6,9 @@ from unittest.mock import Mock
 import pytest
 
 import app as app_module
-import app_factory
-from blueprints import dependencies
-from services import contest_lifecycle, posts, voting
+import app.factory as app_factory
+from app.routes import dependencies
+from app.services import contest_lifecycle, posts, voting
 
 
 @pytest.mark.parametrize(

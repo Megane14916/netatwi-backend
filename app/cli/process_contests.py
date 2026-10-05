@@ -2,7 +2,7 @@
 
 from flask.cli import AppGroup
 
-from services import contest_lifecycle
+from app.services import contest_lifecycle
 
 
 cli = AppGroup()

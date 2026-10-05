@@ -2,9 +2,9 @@
 
 from flask import jsonify, request, session
 
-from models import db
-from services import voting as voting_service
-from runtime_dependencies import route_logger as logger
+from app.models import db
+from app.services import voting as voting_service
+from app.runtime_dependencies import route_logger as logger
 from .legacy import LegacyEndpointBlueprint
 
 

@@ -1,7 +1,7 @@
 """Notification listing and read-state routes."""
 
 from flask import jsonify, session
-from services import notifications as notifications_service
+from app.services import notifications as notifications_service
 from .legacy import LegacyEndpointBlueprint
 
 

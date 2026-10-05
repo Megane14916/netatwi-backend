@@ -4,8 +4,8 @@ import os
 
 from flask import jsonify, request, session
 
-from models import db
-from services import news as news_service
+from app.models import db
+from app.services import news as news_service
 from .legacy import LegacyEndpointBlueprint
 
 

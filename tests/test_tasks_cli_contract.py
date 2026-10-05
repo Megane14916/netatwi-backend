@@ -5,8 +5,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 import app as app_module
-from services import results as results_service
-from models import Contest, ContestResult, Notification, Post, UserStats, db
+from app.services import results as results_service
+from app.models import Contest, ContestResult, Notification, Post, UserStats, db
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
@@ -239,7 +239,7 @@ def test_empty_stats_batch_keeps_single_commit(runner, monkeypatch):
     assert UserStats.query.count() == 0
 
 
-@pytest.mark.parametrize("entry_point", ("task", "cli"))
+@pytest.mark.parametrize("entry_point", ("task", "app.cli"))
 def test_result_generation_failure_propagates_before_notification_commit(
     client, runner, contest_factory, fixed_time, monkeypatch, entry_point
 ):
@@ -271,7 +271,7 @@ def test_result_generation_failure_propagates_before_notification_commit(
 @pytest.mark.parametrize("command", ("process-contests", "update-user-stats"))
 def test_cli_supplies_its_own_application_context(command):
     from flask import has_app_context
-    from models import User
+    from app.models import User
 
     application = app_module.create_app({
         "TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
@@ -296,9 +296,9 @@ def test_cli_supplies_its_own_application_context(command):
 
 
 def test_task_and_cli_registration_preserve_compatibility_names(app):
-    from blueprints.tasks import handle_contest_task
-    from cli.process_contests import process_contests_command
-    from cli.user_stats import update_user_stats
+    from app.routes.tasks import handle_contest_task
+    from app.cli.process_contests import process_contests_command
+    from app.cli.user_stats import update_user_stats
 
     assert app_module.handle_contest_task is handle_contest_task
     assert app_module.process_contests_command is process_contests_command
@@ -308,5 +308,5 @@ def test_task_and_cli_registration_preserve_compatibility_names(app):
         assert application.view_functions["handle_contest_task"] is handle_contest_task
         assert application.cli.commands["process-contests"] is process_contests_command
         assert application.cli.commands["update-user-stats"] is update_user_stats
-        assert process_contests_command.callback.__module__ == "cli.process_contests"
-        assert update_user_stats.callback.__module__ == "cli.user_stats"
+        assert process_contests_command.callback.__module__ == "app.cli.process_contests"
+        assert update_user_stats.callback.__module__ == "app.cli.user_stats"

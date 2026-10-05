@@ -1,6 +1,6 @@
 """Compatibility imports for helpers now owned by runtime_dependencies."""
 
-from runtime_dependencies import (
+from app.runtime_dependencies import (
     _call,
     route_logger,
     allowed_file,

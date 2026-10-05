@@ -6,9 +6,9 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Query
 
-from blueprints import interactions as routes
-from models import Bookmark, Notification, Post, Vote, db
-from services import notifications
+from app.routes import interactions as routes
+from app.models import Bookmark, Notification, Post, Vote, db
+from app.services import notifications
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)

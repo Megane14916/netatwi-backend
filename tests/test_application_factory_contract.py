@@ -10,11 +10,11 @@ from flask import Flask
 from flask.cli import ScriptInfo
 
 import app as app_module
-import app_factory
-import cli
-import runtime_dependencies
-from app_extensions import limiter, migrate
-from models import db
+import app.factory as app_factory
+import app.cli as cli
+import app.runtime_dependencies as runtime_dependencies
+from app.extensions import limiter, migrate
+from app.models import db
 
 
 def load_entry(name):
@@ -48,17 +48,17 @@ def test_bootstrap_and_factory_preserve_initialization_order(monkeypatch):
         return original_register(application, blueprint, **options)
 
     monkeypatch.setattr(Flask, "register_blueprint", register)
-    watch(cli, "register_cli", "cli")
+    watch(cli, "register_cli", "app.cli")
     entry = load_entry("issue51_entry")
     before_routes = ["load_settings", "Flask", "logging", "init_extensions", "register_hooks"]
     routes = [bp.name for bp in entry.BLUEPRINTS]
-    assert events == before_routes + ["images", "bindings"] + routes + ["cli"]
+    assert events == before_routes + ["images", "bindings"] + routes + ["app.cli"]
     assert entry.logger.name == "issue51_entry"
     assert entry.db is db
     assert entry.migrate is migrate
     events.clear()
     application = entry.create_app({"TESTING": True, "SECRET_KEY": "other", "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:"})
-    assert events == before_routes + ["bindings"] + routes + ["cli"]
+    assert events == before_routes + ["bindings"] + routes + ["app.cli"]
     assert application is not entry.app
     assert application.config["SECRET_KEY"] == "other"
     assert entry.app.config["SECRET_KEY"] == "test-only-secret-key"

@@ -5,9 +5,9 @@ import traceback
 
 from flask import current_app, jsonify, request, session
 
-from models import db
-from services import contest_lifecycle
-from services import contests as contest_service
+from app.models import db
+from app.services import contest_lifecycle
+from app.services import contests as contest_service
 from .legacy import LegacyEndpointBlueprint
 
 

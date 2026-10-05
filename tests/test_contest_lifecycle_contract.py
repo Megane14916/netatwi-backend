@@ -8,8 +8,8 @@ from sqlalchemy import event
 from google.cloud import tasks_v2
 
 import app as app_module
-from integrations import cloud_tasks
-from models import Bookmark, Comment, Contest, ContestResult, Notification, Post, Vote, db
+from app.integrations import cloud_tasks
+from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, Vote, db
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)

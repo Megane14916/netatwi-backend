@@ -8,7 +8,7 @@ from sqlalchemy import event
 
 import app as app_module
 from app import db
-from models import Bookmark, Comment, Contest, ContestResult, Notification, Post, Vote
+from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, Vote
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)

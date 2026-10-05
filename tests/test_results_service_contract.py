@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 import app as app_module
-from models import ContestResult, Notification, Post, Vote, db
+from app.models import ContestResult, Notification, Post, Vote, db
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
@@ -95,7 +95,7 @@ def test_generation_bulk_failure_propagates_but_commit_failure_is_swallowed(
     assert ContestResult.query.count() == 0
 
 
-@pytest.mark.parametrize("entry_point", ["task", "cli"])
+@pytest.mark.parametrize("entry_point", ["task", "app.cli"])
 def test_swallowed_result_commit_failure_still_allows_notification_commit(
     client, runner, finished, monkeypatch, entry_point
 ):

@@ -5,8 +5,8 @@ import traceback
 from flask import jsonify, request, session
 from sqlalchemy.exc import IntegrityError
 
-from models import db
-from services import interactions as interaction_service
+from app.models import db
+from app.services import interactions as interaction_service
 from .legacy import LegacyEndpointBlueprint
 
 

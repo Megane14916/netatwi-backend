@@ -5,7 +5,7 @@ from io import BytesIO
 
 import app as app_module
 from app import db
-from models import Contest, Post, Vote
+from app.models import Contest, Post, Vote
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)

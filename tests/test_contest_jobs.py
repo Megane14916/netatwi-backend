@@ -6,7 +6,7 @@ import pytest
 
 import app as app_module
 from app import db
-from models import Contest, ContestResult, Notification, Post
+from app.models import Contest, ContestResult, Notification, Post
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
