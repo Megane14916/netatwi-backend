@@ -84,3 +84,15 @@ def delete_file(
                 logger.info(f"Deleted local file: {file_path}")
     except Exception as e:
         logger.error(f"Error deleting file {file_url}: {e}")
+
+
+def initialize_image_settings():
+    UPLOAD_FOLDER = "static/uploads"
+    ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+    # R2設定
+    USE_R2 = os.environ.get("USE_R2", "False").lower() == "true"
+    R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME")
+    R2_PUBLIC_URL = os.environ.get("R2_PUBLIC_URL", "").rstrip("/")
+    return UPLOAD_FOLDER, ALLOWED_EXTENSIONS, USE_R2, R2_BUCKET_NAME, R2_PUBLIC_URL

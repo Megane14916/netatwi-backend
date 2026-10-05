@@ -6,7 +6,7 @@ The route retains response serialization and the original exception boundary.
 
 from datetime import datetime, timezone
 
-from blueprints.dependencies import (
+from runtime_dependencies import (
     allowed_file,
     calculate_weighted_length,
     delete_file,

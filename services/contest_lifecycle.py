@@ -7,14 +7,12 @@ Tasks integration through app.py's compatibility entry point.
 
 from datetime import datetime, timedelta, timezone
 
-from flask import current_app
+from runtime_dependencies import schedule_contest_task
 
 from models import Contest, Notification, Post, User, Vote, db
 from services import results as results_service
 
 
-def schedule_contest_task(*args):
-    return current_app.extensions["schedule_contest_task"](*args)
 
 
 def get_contest(id):
