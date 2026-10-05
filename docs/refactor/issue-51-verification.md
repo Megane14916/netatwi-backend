@@ -60,7 +60,10 @@ app.py/app_factory.py以外の既存Pythonは、下記のテストharnessを除�
 factoryへの移動前に、同じ別名entryをimportlibで実行してmodule.__dict__を取得する
 harnessへ変更した。テスト本体の初期化順・回数・値・logger・差し替えの期待値は変えない。
 この変更と追加10件は元コードで成功するコミット
-`81cf3259485a4b47f161d2bf0971b99c34dae46a` に保存し、移動後も全文一致する。
+`81cf3259485a4b47f161d2bf0971b99c34dae46a` に保存した。
+CIでGit管理対象外のscripts/内の2ケースが存在しないため失敗したので、
+最終テストでは追跡対象のsync_comment_counts.pyだけを必須にする。
+比較スクリプトはこのparameterリスト変更だけを許可し、テスト本体・期待値の一致を確認する。
 
 ```powershell
 $pythonExe = "$env:TEMP\netatwi-issue3-venv\Scripts\python.exe"
@@ -74,7 +77,9 @@ git diff --check origin/master HEAD
 
 - 移動前の既存テスト: **615 passed**。
 - 追加10件と既存共通helper34件: **44 passed**。移動前の全テスト: **625 passed**。
-- 移動後の同44件と全テスト: **625 passed**。既存警告371件。
+- 移動直後の同44件と全テスト: **625 passed**。
+  CI対象を追跡ファイルへ修正後の追加8件・共通helper34件は **42 passed**、
+  最終全テストは **623 passed**。既存警告371件。
 - 設定読取→Flask→logging→extensions→hooks→画像初期化→callback→
   元の順の15 Blueprint→CLIを実行記録で確認。factoryでは画像初期化を繰り返さない。
 - 既定appとfactory2個のroute登録順、endpoint/handler、CLI順とオブジェクト同一性、
@@ -84,7 +89,9 @@ git diff --check origin/master HEAD
 - Flaskのapp:appとapp:create_app(...)を解決し、WSGIの/api/me、CLI名を確認。
 - __main__で実行し、db.create_all→print→serverの順と、PORT既定5001/指定8123、
   host/debug引数を確認。DB作成とサーバー起動はfakeで、実接続はしない。
-- 3つの補助スクリプトをmain以外の名前で実行し、app/dbが同じ公開オブジェクトと確認。
+- 追跡対象のsync_comment_counts.pyをmain以外の名前で実行し、app/dbが同じ公開
+  オブジェクトと確認。ローカルだけのscripts/内2ファイルも同様に確認したが、
+  .gitignore対象なのでCIの必須ケースには含めない。
 - 新規Pythonプロセスでapp_factoryのみをimportし、app/Blueprint/既定appの
   初期化がないことを確認。既定appをNoneに差し替えてもfactoryは全route/CLIを登録し、
   旧appのURL mapやcommandsを参照しないことを別途確認。
@@ -103,6 +110,7 @@ Python 3.11はPRのGitHub Actionsで確認する。
 1. 元コードで成功する特性テストと既存テストharnessの接続変更を保存。
 2. 検証済みのfactoryへの移動・互換名公開とfallback除去を保存。
 3. 機械抽出・独立比較スクリプトと本記録を保存。
+4. CIの失敗原因だったGit管理対象外の補助スクリプト2ケースを必須対象から外し、記録を修正。
 
 設定解釈、DB初期化、CORS/Limiter/hooks/エラー応答、URL/CLI、画像・Cloud Tasks・
 client cache、複数app間の状態共有、SQL/時刻/commit/rollback/認証の改善は含めない。

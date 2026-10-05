@@ -142,8 +142,12 @@ initialize_application(globals())
     for path in paths:
         if path.endswith(".py") and path not in {"app.py", "app_factory.py", "tests/test_shared_helper_contract.py"}:
             assert current(path) == original(path), path
-    for path in ("tests/test_shared_helper_contract.py", "tests/test_application_factory_contract.py"):
-        assert current(path) == original(path, TEST_BASELINE), path
+    assert current("tests/test_shared_helper_contract.py") == original("tests/test_shared_helper_contract.py", TEST_BASELINE)
+    path = "tests/test_application_factory_contract.py"
+    expected_factory_test = original(path, TEST_BASELINE).replace(
+        '["sync_comment_counts.py", "scripts/sync_comment_count.py", "scripts/recalculate_contest_stats.py"]',
+        '["sync_comment_counts.py"]')
+    assert current(path) == expected_factory_test, path
     expected_test = original("tests/test_shared_helper_contract.py").replace("import runpy", "import importlib.util")
     expected_test = expected_test.replace('    loaded = runpy.run_path("app.py", run_name="issue50_entry")', '''    spec = importlib.util.spec_from_file_location("issue50_entry", "app.py")
     entry = importlib.util.module_from_spec(spec)
@@ -151,7 +155,7 @@ initialize_application(globals())
     loaded = entry.__dict__''')
     expected_test = expected_test.replace('    namespace = loaded["create_app"].__globals__', "    namespace = entry.__dict__")
     assert current("tests/test_shared_helper_contract.py") == expected_test
-    print("Only entry-loading/namespace lookup in previous test changed; expectations, other existing Python and pre-extraction tests unchanged")
+    print("Previous test only changes entry harness; new test only drops ignored local script cases; all expectations and other Python unchanged")
 
 
 if __name__ == "__main__":

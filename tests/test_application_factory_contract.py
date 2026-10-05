@@ -153,7 +153,7 @@ def test_direct_entry_creates_tables_then_runs_server(monkeypatch, capsys, port,
     assert capsys.readouterr().out == "Database tables created (if not existed).\n"
 
 
-@pytest.mark.parametrize("path", ["sync_comment_counts.py", "scripts/sync_comment_count.py", "scripts/recalculate_contest_stats.py"])
+@pytest.mark.parametrize("path", ["sync_comment_counts.py"])
 def test_auxiliary_script_imports_keep_app_and_db(path):
     assert Path(path).is_file()
     loaded = runpy.run_path(path, run_name="issue51_script")
