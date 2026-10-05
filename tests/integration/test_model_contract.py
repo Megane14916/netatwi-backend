@@ -12,7 +12,7 @@ from sqlalchemy.dialects import sqlite
 from sqlalchemy.schema import CreateIndex, CreateTable
 
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).parents[1] / "snapshots"
 MODEL_NAMES = {
     "User",
     "Contest",

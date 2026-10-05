@@ -11,7 +11,7 @@ from werkzeug.exceptions import RequestEntityTooLarge
 
 
 ROUTES = json.loads(
-    (Path(__file__).parent / "fixtures" / "url_map.json").read_text(encoding="utf-8")
+    (Path(__file__).parents[1] / "snapshots" / "url_map.json").read_text(encoding="utf-8")
 )
 
 
