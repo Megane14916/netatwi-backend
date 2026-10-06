@@ -3,12 +3,13 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy.orm import Query
 
 from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, Vote, db
 
 
 @pytest.mark.parametrize("kind", ["contest", "post"])
-@pytest.mark.parametrize("fail_commit", [False, True])
+@pytest.mark.parametrize("fail_commit", [False, True, "delete"])
 @pytest.mark.parametrize("loaded", [False, True])
 def test_related_deletion_with_foreign_keys_and_rollback(
     client, user_factory, contest_factory, login, fixed_time, monkeypatch, kind, fail_commit, loaded
@@ -41,13 +42,26 @@ def test_related_deletion_with_foreign_keys_and_rollback(
     login(user)
     fixed_time(now)
     before = {m: m.query.count() for m in (Contest, Post, Vote, Bookmark, Comment, ContestResult, Notification)}
-    if fail_commit:
-        monkeypatch.setattr(db.session, "commit", lambda: (_ for _ in ()).throw(RuntimeError("commit failed")))
+    failures = []
+    if fail_commit == "delete":
+        original_delete = Query.delete
+        def delete(query, *args, **kwargs):
+            if query.column_descriptions[0]["entity"] is Comment:
+                failures.append("delete")
+                raise RuntimeError("dependent deletion failed")
+            return original_delete(query, *args, **kwargs)
+        monkeypatch.setattr(Query, "delete", delete)
+    elif fail_commit:
+        def commit():
+            failures.append("commit")
+            raise RuntimeError("commit failed")
+        monkeypatch.setattr(db.session, "commit", commit)
     path = f"/api/admin/contests/{contest_id}" if kind == "contest" else f"/api/contests/{contest_id}/posts/{post_id}"
     response = client.delete(path)
     assert response.status_code == (500 if fail_commit else 200)
     db.session.expire_all()
     if fail_commit:
+        assert failures == ["delete" if fail_commit == "delete" else "commit"]
         assert {m: m.query.count() for m in before} == before
         assert db.session.get(Contest, child_id).parent_contest_id == contest_id
     else:
