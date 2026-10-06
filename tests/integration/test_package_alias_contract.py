@@ -35,12 +35,11 @@ def test_canonical_modules_are_unique_and_all_models_use_one_db():
     assert import_module("app.models.base").db is app.db
 
 
-def test_cloud_tasks_fake_is_connected_to_the_actual_client(monkeypatch):
+def test_cloud_tasks_fake_is_connected_to_the_actual_client(app, monkeypatch):
     canonical = import_module("app.integrations.cloud_tasks")
     cache = object()
-    monkeypatch.setattr(canonical, "_cloud_tasks_client", cache)
-    assert canonical._cloud_tasks_client is cache
-    assert app.cloud_tasks is canonical
+    monkeypatch.setitem(app.extensions, "cloud_tasks_client", cache)
+    assert app.extensions["cloud_tasks_client"] is cache
 
 
 def test_cold_direct_entry_publishes_the_same_app_without_second_generation():

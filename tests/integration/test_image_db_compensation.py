@@ -1,5 +1,7 @@
 """Image storage failures must not leave DB references broken (Refs #26)."""
 
+from app.integrations import images
+
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 import json
@@ -34,8 +36,8 @@ def test_db_failure_keeps_old_files_and_removes_new_uploads(
         return "new.png"
     def delete(url):
         stored.discard(url)
-    monkeypatch.setattr(app_module, "save_file", save)
-    monkeypatch.setattr(app_module, "delete_file", delete)
+    monkeypatch.setattr(images, "save_file", save)
+    monkeypatch.setattr(images, "delete_file", delete)
     monkeypatch.setattr(db.session, "commit", Mock(side_effect=RuntimeError("DB failure")))
     login(user)
     fixed_time(now)
@@ -53,7 +55,7 @@ def test_db_failure_keeps_old_files_and_removes_new_uploads(
 
 def test_failed_cleanup_logs_signed_retry_and_retry_is_idempotent(app, runner, monkeypatch, caplog):
     delete = Mock(side_effect=RuntimeError("storage unavailable"))
-    monkeypatch.setattr(app_module, "delete_file", delete)
+    monkeypatch.setattr(images, "delete_file", delete)
     assert cleanup_images(["owned.png"]) == ["owned.png"]
     record = next(record.message for record in caplog.records if "IMAGE_CLEANUP_PENDING" in record.message)
     token = json.loads(record.split(" ", 1)[1])["token"]
@@ -75,7 +77,7 @@ def test_retry_rejects_forged_token_and_retains_referenced_image(
     db.session.add(post)
     db.session.commit()
     delete = Mock()
-    monkeypatch.setattr(app_module, "delete_file", delete)
+    monkeypatch.setattr(images, "delete_file", delete)
     for token in ["forged", _cleanup_signer().dumps("owned.png")]:
         result = runner.invoke(args=["retry-image-cleanup", "--token", token])
         assert result.exit_code != 0
@@ -97,9 +99,9 @@ def test_partial_upload_error_url_is_compensated(
         path += f"/{post.id}"
     error = RuntimeError("partial upload failed")
     error.uploaded_image_url = "partial.png"
-    monkeypatch.setattr(app_module, "save_file", Mock(side_effect=error))
+    monkeypatch.setattr(images, "save_file", Mock(side_effect=error))
     delete = Mock()
-    monkeypatch.setattr(app_module, "delete_file", delete)
+    monkeypatch.setattr(images, "delete_file", delete)
     login(user)
     fixed_time(now)
     response = getattr(client, method)(path, data={"content": "Changed", "images": (BytesIO(b"image"), "image.png")})
@@ -123,11 +125,11 @@ def test_storage_partial_failure_retains_generated_cleanup_url(app, tmp_path, us
                     R2_BUCKET_NAME="fake-bucket", get_r2_client=lambda: storage,
                     logger=app.logger)
     with pytest.raises(RuntimeError) as raised:
-        images.save_file(file, R2_PUBLIC_URL="https://fake.example", **settings)
+        images._save_file(file, R2_PUBLIC_URL="https://fake.example", **settings)
     url = raised.value.uploaded_image_url
     assert url.startswith("https://fake.example/" if use_r2 else "/static/uploads/")
-    images.delete_file(url, **settings)
-    images.delete_file(url, **settings)
+    images._delete_file(url, **settings)
+    images._delete_file(url, **settings)
     if use_r2:
         assert storage.delete_object.call_count == 2
     else:
@@ -149,8 +151,8 @@ def test_later_upload_failure_compensates_earlier_success(
         path += f"/{post.id}"
     save = Mock(side_effect=["first.png", RuntimeError("second upload failed")])
     delete = Mock()
-    monkeypatch.setattr(app_module, "save_file", save)
-    monkeypatch.setattr(app_module, "delete_file", delete)
+    monkeypatch.setattr(images, "save_file", save)
+    monkeypatch.setattr(images, "delete_file", delete)
     login(user)
     fixed_time(now)
     response = getattr(client, method)(path, data={"content": "Changed", "images": [

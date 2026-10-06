@@ -60,10 +60,26 @@ def load_settings(overrides=None):
         "SESSION_COOKIE_HTTPONLY": True,
         "PERMANENT_SESSION_LIFETIME": timedelta(days=31),
         "MAX_CONTENT_LENGTH": 17 * 1024 * 1024,
+        "UPLOAD_FOLDER": "static/uploads",
+        "ALLOWED_EXTENSIONS": {"png", "jpg", "jpeg", "gif", "webp"},
+        "USE_R2": os.environ.get("USE_R2", "False").lower() == "true",
+        "R2_BUCKET_NAME": os.environ.get("R2_BUCKET_NAME"),
+        "R2_PUBLIC_URL": os.environ.get("R2_PUBLIC_URL", "").rstrip("/"),
+        "R2_ENDPOINT_URL": os.environ.get("R2_ENDPOINT_URL"),
+        "R2_ACCESS_KEY_ID": os.environ.get("R2_ACCESS_KEY_ID"),
+        "R2_SECRET_ACCESS_KEY": os.environ.get("R2_SECRET_ACCESS_KEY"),
+        "X_CONSUMER_KEY": os.environ.get("X_CONSUMER_KEY"),
+        "X_CONSUMER_SECRET": os.environ.get("X_CONSUMER_SECRET"),
+        "GCP_PROJECT_ID": os.environ.get("GCP_PROJECT_ID"),
+        "GCP_LOCATION": os.environ.get("GCP_LOCATION"),
+        "GCP_QUEUE_NAME": os.environ.get("GCP_QUEUE_NAME"),
+        "TASK_HANDLER_URL": os.environ.get("TASK_HANDLER_URL"),
+        "GCR_URL": os.environ.get("GCR_URL"),
         "TASKS_OIDC_AUDIENCE": os.environ.get("TASKS_OIDC_AUDIENCE", ""),
         "TASKS_SERVICE_ACCOUNT_EMAIL": os.environ.get("TASKS_SERVICE_ACCOUNT_EMAIL", ""),
         **session_cookie_config,
         **overrides,
     }
     config["FRONTEND_URL"] = frontend_url
+    config["R2_PUBLIC_URL"] = (config["R2_PUBLIC_URL"] or "").rstrip("/")
     return RuntimeSettings(config, frontend_url, backend_url, is_local_dev)

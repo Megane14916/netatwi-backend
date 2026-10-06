@@ -71,7 +71,7 @@ def test_tampered_signature_and_config_or_certificate_failure_fail_closed(
 
 @pytest.mark.parametrize("setting", ["TASKS_OIDC_AUDIENCE", "TASKS_SERVICE_ACCOUNT_EMAIL"])
 def test_scheduler_never_enqueues_unsigned_task(app, fake_cloud_tasks, monkeypatch, setting):
-    monkeypatch.setenv(setting, "")
+    monkeypatch.setitem(app.config, setting, "")
     with pytest.raises(ValueError, match="OIDC"):
         cloud_tasks.schedule_contest_task(1, "post_start", datetime.now(timezone.utc))
     fake_cloud_tasks.create_task.assert_not_called()

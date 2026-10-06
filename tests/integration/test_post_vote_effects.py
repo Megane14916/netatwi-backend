@@ -1,5 +1,8 @@
 """Counters and file operations caused by post and vote endpoints."""
 
+from flask import current_app
+from app.integrations import images
+
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
@@ -146,16 +149,16 @@ def test_local_file_save_and_delete_are_confined_to_temp_folder(
 ):
     from werkzeug.datastructures import FileStorage
 
-    monkeypatch.setattr(app_module, "USE_R2", False)
-    monkeypatch.setattr(app_module, "UPLOAD_FOLDER", str(tmp_path))
+    monkeypatch.setitem(current_app.config, "USE_R2", False)
+    monkeypatch.setitem(current_app.config, "UPLOAD_FOLDER", str(tmp_path))
     image = FileStorage(
         stream=BytesIO(b"local image"), filename="photo.png", content_type="image/png"
     )
 
-    url = app_module.save_file(image)
+    url = images.save_file(image)
     saved = tmp_path / url.rsplit("/", 1)[1]
     assert url.startswith("/static/uploads/")
     assert saved.read_bytes() == b"local image"
 
-    app_module.delete_file(url)
+    images.delete_file(url)
     assert not saved.exists()

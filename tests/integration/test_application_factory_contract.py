@@ -12,7 +12,6 @@ from flask.cli import ScriptInfo
 import app as app_module
 import app.factory as app_factory
 import app.cli as cli
-import app.runtime_dependencies as runtime_dependencies
 from app.extensions import limiter, migrate
 from app.models import db
 
@@ -40,7 +39,6 @@ def test_bootstrap_and_factory_preserve_initialization_order(monkeypatch):
         watch(app_factory, name, name)
     watch(app_factory.logging, "basicConfig", "logging")
     watch(app_module.image_storage, "initialize_image_settings", "images")
-    watch(runtime_dependencies, "register_helper_bindings", "bindings")
     original_register = Flask.register_blueprint
 
     def register(application, blueprint, **options):
@@ -52,13 +50,13 @@ def test_bootstrap_and_factory_preserve_initialization_order(monkeypatch):
     entry = load_entry("issue51_entry")
     before_routes = ["load_settings", "Flask", "logging", "init_extensions", "register_hooks"]
     routes = [bp.name for bp in entry.BLUEPRINTS]
-    assert events == before_routes + ["images", "bindings"] + routes + ["app.cli"]
+    assert events == before_routes + ["images"] + routes + ["app.cli"]
     assert entry.logger.name == "issue51_entry"
     assert entry.db is db
     assert entry.migrate is migrate
     events.clear()
     application = entry.create_app({"TESTING": True, "SECRET_KEY": "other", "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:"})
-    assert events == before_routes + ["bindings"] + routes + ["app.cli"]
+    assert events == before_routes + ["images"] + routes + ["app.cli"]
     assert application is not entry.app
     assert application.config["SECRET_KEY"] == "other"
     assert entry.app.config["SECRET_KEY"] == "test-only-secret-key"
@@ -104,18 +102,6 @@ def test_factory_keeps_live_entry_callback_and_cli_seams(monkeypatch):
     base.assert_called_once_with(config)
     register.assert_called_once_with(application)
     command_register.assert_called_once_with(application)
-    save = Mock(return_value="image")
-    logger = Mock()
-    scheduler = Mock(return_value="task")
-    monkeypatch.setattr(entry, "save_file", save)
-    monkeypatch.setattr(entry, "logger", logger)
-    monkeypatch.setattr(entry, "schedule_contest_task", scheduler)
-    for active in (entry.app, application):
-        with active.app_context():
-            assert runtime_dependencies.save_file("file") == "image"
-            runtime_dependencies.route_logger.info("entry")
-            assert runtime_dependencies.schedule_contest_task(1, "event", "time") == "task"
-    assert save.call_count == logger.info.call_count == scheduler.call_count == 2
 
 
 @pytest.mark.parametrize("mode", ["default", "factory"])

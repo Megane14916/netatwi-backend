@@ -2,13 +2,13 @@
 
 HTTP conversion and admin exception handlers stay in their original routes.
 Scheduling uses the existing application callback, which reaches the Cloud
-Tasks integration through app.py's compatibility entry point.
+Tasks integration using the active application configuration.
 """
 
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
-from app.runtime_dependencies import schedule_contest_task
+from app.integrations import cloud_tasks
 
 from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, User, Vote, db
 from app.services import results as results_service
@@ -122,25 +122,25 @@ def create_contest(data):
         db.session.commit()
 
         # Cloud Tasksのスケジュール
-        schedule_contest_task(
+        cloud_tasks.schedule_contest_task(
             qualifier_contest.id, "post_start", qualifier_contest.start_time
         )
-        schedule_contest_task(
+        cloud_tasks.schedule_contest_task(
             qualifier_contest.id, "voting_start", qualifier_contest.end_time
         )
-        schedule_contest_task(
+        cloud_tasks.schedule_contest_task(
             qualifier_contest.id,
             "result_announce",
             qualifier_contest.voting_end_time,
         )
 
-        schedule_contest_task(
+        cloud_tasks.schedule_contest_task(
             final_contest.id, "post_start", final_contest.start_time
         )
-        schedule_contest_task(
+        cloud_tasks.schedule_contest_task(
             final_contest.id, "voting_start", final_contest.end_time
         )
-        schedule_contest_task(
+        cloud_tasks.schedule_contest_task(
             final_contest.id, "result_announce", final_contest.voting_end_time
         )
 
@@ -173,9 +173,9 @@ def create_contest(data):
         db.session.add(new_contest)
         db.session.commit()
 
-        schedule_contest_task(new_contest.id, "post_start", new_contest.start_time)
-        schedule_contest_task(new_contest.id, "voting_start", new_contest.end_time)
-        schedule_contest_task(
+        cloud_tasks.schedule_contest_task(new_contest.id, "post_start", new_contest.start_time)
+        cloud_tasks.schedule_contest_task(new_contest.id, "voting_start", new_contest.end_time)
+        cloud_tasks.schedule_contest_task(
             new_contest.id, "result_announce", new_contest.voting_end_time
         )
 
@@ -249,9 +249,9 @@ def update_contest(contest, data):
     db.session.commit()
 
     # 時刻が変更された可能性があるのでタスクを再スケジュール
-    schedule_contest_task(contest.id, "post_start", contest.start_time)
-    schedule_contest_task(contest.id, "voting_start", contest.end_time)
-    schedule_contest_task(contest.id, "result_announce", contest.voting_end_time)
+    cloud_tasks.schedule_contest_task(contest.id, "post_start", contest.start_time)
+    cloud_tasks.schedule_contest_task(contest.id, "voting_start", contest.end_time)
+    cloud_tasks.schedule_contest_task(contest.id, "result_announce", contest.voting_end_time)
 
     return ({"message": "Contest updated successfully"}), 200
 

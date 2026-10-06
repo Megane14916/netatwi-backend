@@ -1,5 +1,9 @@
 """Characterize admin writes, task scheduling and deletion before extraction."""
 
+from flask import current_app
+from app.integrations import cloud_tasks
+from app.integrations import images
+
 from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
@@ -49,7 +53,7 @@ def observe_admin_effects(monkeypatch, *, fail_commit=False, fail_schedule=False
 
     monkeypatch.setattr(db.session, "commit", commit)
     monkeypatch.setattr(db.session, "rollback", rollback)
-    monkeypatch.setattr(app_module, "schedule_contest_task", schedule)
+    monkeypatch.setattr(cloud_tasks, "schedule_contest_task", schedule)
     return effects
 
 
@@ -199,7 +203,7 @@ def test_delete_original_targets_and_order_leaves_related_data_and_child(client,
     db.session.commit()
     deletes = []
     delete_image = Mock()
-    monkeypatch.setattr(app_module, "delete_file", delete_image)
+    monkeypatch.setattr(images, "delete_file", delete_image)
 
     def record(_conn, _cursor, statement, _params, _context, _executemany):
         if statement.startswith("DELETE FROM "):
@@ -244,7 +248,7 @@ def test_admin_commit_failure_rolls_back_updated_or_deleted_data(client, admin, 
 ])
 def test_schedule_timestamp_url_headers_and_exact_past_boundary(app, fixed_time, fake_cloud_tasks, moment, expected):
     fixed_time(NOW)
-    app_module.schedule_contest_task(42, "post_start", moment)
+    cloud_tasks.schedule_contest_task(42, "post_start", moment)
     request = fake_cloud_tasks.create_task.call_args.kwargs["request"]
     assert request["parent"] == "projects/test/locations/test/queues/test"
     task = request["task"]
@@ -258,33 +262,33 @@ def test_schedule_timestamp_url_headers_and_exact_past_boundary(app, fixed_time,
 
 def test_schedule_missing_config_fallback_and_error_boundaries(app, fixed_time, fake_cloud_tasks, monkeypatch, capsys):
     fixed_time(NOW)
-    monkeypatch.setenv("GCP_PROJECT_ID", "")
-    app_module.schedule_contest_task(42, "post_start", NOW)
+    monkeypatch.setitem(current_app.config, "GCP_PROJECT_ID", "")
+    cloud_tasks.schedule_contest_task(42, "post_start", NOW)
     fake_cloud_tasks.create_task.assert_not_called()
     assert capsys.readouterr().out == "Skipping task scheduling for post_start - GCP configuration missing.\n"
-    monkeypatch.setenv("GCP_PROJECT_ID", "test")
-    monkeypatch.setenv("TASK_HANDLER_URL", "")
-    monkeypatch.setenv("GCR_URL", "https://fallback.example/")
+    monkeypatch.setitem(current_app.config, "GCP_PROJECT_ID", "test")
+    monkeypatch.setitem(current_app.config, "TASK_HANDLER_URL", "")
+    monkeypatch.setitem(current_app.config, "GCR_URL", "https://fallback.example/")
     fake_cloud_tasks.create_task.side_effect = RuntimeError("API failed")
-    assert app_module.schedule_contest_task(42, "post_start", NOW) is None
+    assert cloud_tasks.schedule_contest_task(42, "post_start", NOW) is None
     assert fake_cloud_tasks.create_task.call_args.kwargs["request"]["task"]["http_request"]["url"] == (
         "https://fallback.example//api/tasks/contest/42/post_start")
     assert capsys.readouterr().out == "Failed to create task for post_start: API failed\n"
     fake_cloud_tasks.queue_path.side_effect = RuntimeError("queue failed")
     with pytest.raises(RuntimeError, match="queue failed"):
-        app_module.schedule_contest_task(42, "post_start", NOW)
+        cloud_tasks.schedule_contest_task(42, "post_start", NOW)
 
 
 def test_schedule_client_is_lazy_and_reused(app, fake_cloud_tasks, fixed_time, monkeypatch):
     fixed_time(NOW)
-    monkeypatch.setattr(scheduler_module, "_cloud_tasks_client", None)
+    current_app.extensions.pop("cloud_tasks_client", None)
     factory = Mock(return_value=fake_cloud_tasks)
     monkeypatch.setattr(tasks_v2, "CloudTasksClient", factory)
-    monkeypatch.setenv("GCP_PROJECT_ID", "")
-    app_module.schedule_contest_task(42, "post_start", NOW)
+    monkeypatch.setitem(current_app.config, "GCP_PROJECT_ID", "")
+    cloud_tasks.schedule_contest_task(42, "post_start", NOW)
     factory.assert_not_called()
-    monkeypatch.setenv("GCP_PROJECT_ID", "test")
+    monkeypatch.setitem(current_app.config, "GCP_PROJECT_ID", "test")
     for event_type in ("post_start", "voting_start"):
-        app_module.schedule_contest_task(42, event_type, NOW)
+        cloud_tasks.schedule_contest_task(42, event_type, NOW)
     factory.assert_called_once_with()
     assert fake_cloud_tasks.create_task.call_count == 2

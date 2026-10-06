@@ -1,13 +1,13 @@
 """Shared request hooks and error responses."""
 
-import logging
+from flask import current_app
+
 
 from flask import jsonify, request, session
 
 from app.models import User, db
 
 
-logger = logging.getLogger("app")
 
 
 def invalidate_stale_user_session():
@@ -38,7 +38,7 @@ def log_request_info():
     if request.path.startswith("/api/login") or request.path.startswith(
         "/api/callback"
     ):
-        logger.info("OAuth request started; endpoint=%s; secure=%s",
+        current_app.logger.info("OAuth request started; endpoint=%s; secure=%s",
                     request.endpoint, request.is_secure)
 
 

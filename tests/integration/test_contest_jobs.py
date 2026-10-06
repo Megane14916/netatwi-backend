@@ -1,5 +1,7 @@
 """Observable database effects of scheduled and batch contest jobs."""
 
+from app.integrations import cloud_tasks
+
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -109,7 +111,7 @@ def test_overdue_task_is_scheduled_ten_seconds_from_now(
 ):
     fixed_time(NOW)
 
-    app_module.schedule_contest_task(42, "result_announce", NOW - timedelta(hours=1))
+    cloud_tasks.schedule_contest_task(42, "result_announce", NOW - timedelta(hours=1))
 
     request = fake_cloud_tasks.create_task.call_args.kwargs["request"]
     assert request["parent"] == "projects/test/locations/test/queues/test"

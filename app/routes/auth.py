@@ -1,6 +1,5 @@
 """HTTP input/output for X OAuth and judge authentication."""
 
-import logging
 import traceback
 
 from flask import current_app, jsonify, redirect, request, session
@@ -12,7 +11,6 @@ from flask import Blueprint
 
 
 bp = Blueprint("auth", __name__)
-logger = logging.getLogger("app")
 
 
 @bp.route("/api/login/twitter")
@@ -21,7 +19,7 @@ def twitter_login():
         authorization_url = auth_service.start_twitter_login()
         return jsonify({"authorization_url": authorization_url})
     except Exception as e:
-        logger.error("X authorization failed; exception_type=%s", type(e).__name__)
+        current_app.logger.error("X authorization failed; exception_type=%s", type(e).__name__)
         return jsonify({"error": "Failed to connect to Twitter"}), 500
 
 
@@ -44,7 +42,7 @@ def twitter_callback():
         if failure_reason is not None:
             return redirect(f"{current_app.config['FRONTEND_URL']}?login_error={failure_reason}")
     except Exception as e:
-        logger.error("X callback failed; exception_type=%s", type(e).__name__)
+        current_app.logger.error("X callback failed; exception_type=%s", type(e).__name__)
         db.session.rollback()
         return redirect(f"{current_app.config['FRONTEND_URL']}?login_error=callback_failed")
 

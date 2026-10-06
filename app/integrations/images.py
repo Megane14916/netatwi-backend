@@ -1,4 +1,4 @@
-"""Image storage operations; settings and helper seams remain owned by app.py."""
+"""Image storage using the active application settings and lazy client."""
 
 import os
 import uuid
@@ -6,25 +6,33 @@ from urllib.parse import urlparse
 
 import boto3
 from werkzeug.utils import secure_filename
+from flask import current_app
 
 
 def get_r2_client():
+    if "r2_client" not in current_app.extensions:
+        current_app.extensions["r2_client"] = _create_r2_client()
+    return current_app.extensions["r2_client"]
+
+
+def _create_r2_client():
     return boto3.client(
         "s3",
-        endpoint_url=os.environ.get("R2_ENDPOINT_URL"),
-        aws_access_key_id=os.environ.get("R2_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.environ.get("R2_SECRET_ACCESS_KEY"),
+        endpoint_url=current_app.config.get("R2_ENDPOINT_URL"),
+        aws_access_key_id=current_app.config.get("R2_ACCESS_KEY_ID"),
+        aws_secret_access_key=current_app.config.get("R2_SECRET_ACCESS_KEY"),
         region_name="auto",
     )
 
 
-def allowed_file(filename, *, ALLOWED_EXTENSIONS):
+def allowed_file(filename):
+    ALLOWED_EXTENSIONS = current_app.config["ALLOWED_EXTENSIONS"]
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 # Keyword names preserve the original helper bodies. app.py passes its current
 # settings and callbacks on each invocation, including patched test doubles.
-def save_file(
+def _save_file(
     file, *, UPLOAD_FOLDER, USE_R2, R2_BUCKET_NAME, R2_PUBLIC_URL, get_r2_client, logger
 ):
     """ファイルを保存し、パブリックURLを返す"""
@@ -61,7 +69,7 @@ def save_file(
         return f"/static/uploads/{unique_filename}"
 
 
-def delete_file(
+def _delete_file(
     file_url, *, UPLOAD_FOLDER, USE_R2, R2_BUCKET_NAME, get_r2_client, logger
 ):
     """URLからファイルを特定して削除する"""
@@ -93,13 +101,19 @@ def delete_file(
         raise
 
 
-def initialize_image_settings():
-    UPLOAD_FOLDER = "static/uploads"
-    ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+def save_file(file):
+    config = current_app.config
+    return _save_file(file, UPLOAD_FOLDER=config["UPLOAD_FOLDER"], USE_R2=config["USE_R2"],
+                      R2_BUCKET_NAME=config["R2_BUCKET_NAME"], R2_PUBLIC_URL=config["R2_PUBLIC_URL"],
+                      get_r2_client=get_r2_client, logger=current_app.logger)
 
-    # R2設定
-    USE_R2 = os.environ.get("USE_R2", "False").lower() == "true"
-    R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME")
-    R2_PUBLIC_URL = os.environ.get("R2_PUBLIC_URL", "").rstrip("/")
-    return UPLOAD_FOLDER, ALLOWED_EXTENSIONS, USE_R2, R2_BUCKET_NAME, R2_PUBLIC_URL
+
+def delete_file(file_url):
+    config = current_app.config
+    return _delete_file(file_url, UPLOAD_FOLDER=config["UPLOAD_FOLDER"], USE_R2=config["USE_R2"],
+                        R2_BUCKET_NAME=config["R2_BUCKET_NAME"], get_r2_client=get_r2_client,
+                        logger=current_app.logger)
+
+
+def initialize_image_settings(application):
+    os.makedirs(application.config["UPLOAD_FOLDER"], exist_ok=True)

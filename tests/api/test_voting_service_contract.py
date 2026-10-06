@@ -1,5 +1,7 @@
 """Freeze vote replacement, score/award handling and transaction boundaries."""
 
+from app.services import voting as voting_service
+
 from datetime import datetime, timedelta, timezone
 import logging
 
@@ -331,7 +333,7 @@ def test_text_validation_normalizes_form_and_ignores_json_content(client, app, v
     _, _, _, _, path = voting
     seen = []
     form_content = [None]
-    monkeypatch.setattr(app_module, "calculate_weighted_length", lambda text: seen.append(text) or len(text))
+    monkeypatch.setattr(voting_service, "calculate_weighted_length", lambda text: seen.append(text) or len(text))
 
     @app.before_request
     def provide_form_content():
@@ -357,7 +359,7 @@ def test_null_json_and_validation_exception_remain_outside_handler(client, votin
     def fail_length(_text):
         raise RuntimeError("length failed")
 
-    monkeypatch.setattr(app_module, "calculate_weighted_length", fail_length)
+    monkeypatch.setattr(voting_service, "calculate_weighted_length", fail_length)
     with pytest.raises(RuntimeError, match="length failed"):
         client.post(path, json={"votes": {}})
 
