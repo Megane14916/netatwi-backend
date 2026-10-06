@@ -14,6 +14,49 @@ from app.models import Contest, Post, Vote, db
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
 
 
+@pytest.mark.parametrize("target", ["foreign", "missing", "own", "invalid_id"])
+@pytest.mark.parametrize("kind", ["vote", "award", "mixed"])
+def test_invalid_targets_leave_existing_votes_award_and_counters_unchanged(
+    client, voting, contest_factory, user_factory, login, target, kind
+):
+    contest, voter, post, own, path = voting
+    foreign = contest_factory(NOW, NOW, NOW)
+    foreign_post = Post(contest_id=foreign.id, user_id=user_factory("foreign").id, content="Other")
+    db.session.add(foreign_post)
+    db.session.commit()
+    vote = seed_vote(contest, voter, post, judge=True)
+    vote.is_judge_award = True
+    vote.judge_comment = "existing award"
+    db.session.commit()
+    vote_id = vote.id
+    login(voter, judge_contests=[contest.id])
+    pid = {"foreign": foreign_post.id, "missing": 99999, "own": own.id, "invalid_id": "bad"}[target]
+    payload = {"votes": {str(pid): 1} if kind == "vote" else {}}
+    if kind != "vote":
+        payload["judgeAward"] = {"postId": pid, "comment": "new"}
+    if kind == "mixed":
+        payload["votes"] = {str(post.id): 3}
+    response = client.post(path, json=payload)
+    assert response.status_code == 400
+    saved = Vote.query.one()
+    assert (saved.id, saved.post_id, saved.count, saved.is_judge_award, saved.judge_comment) == (
+        vote_id, post.id, 1, True, "existing award")
+    assert counts(contest) == (1, 1)
+    assert counts(foreign) == (0, 0)
+
+
+@pytest.mark.parametrize("score", [None, -1, 6, "NaN", "Infinity", "bad"])
+def test_invalid_score_preserves_existing_vote(client, voting, login, score):
+    contest, voter, post, _, path = voting
+    vote = seed_vote(contest, voter, post, judge=True)
+    vote_id = vote.id
+    login(voter, judge_contests=[contest.id])
+    assert client.post(path, json={"votes": {str(post.id): score}}).status_code == 400
+    assert Vote.query.one().id == vote_id
+    assert Vote.query.one().count == 1
+    assert counts(contest) == (1, 1)
+
+
 @pytest.fixture
 def voting(client, contest_factory, user_factory, login, fixed_time):
     contest = contest_factory(NOW - timedelta(hours=1), NOW, NOW + timedelta(hours=1),
@@ -43,6 +86,113 @@ def seed_vote(contest, voter, post, judge=False):
     return vote
 
 
+@pytest.mark.parametrize("award", [[], False, 0, "", {}])
+@pytest.mark.parametrize("with_scores", [False, True])
+def test_falsy_invalid_award_preserves_existing_vote_and_counters(
+    client, voting, login, award, with_scores
+):
+    contest, voter, post, _, path = voting
+    vote = seed_vote(contest, voter, post, judge=True)
+    vote.is_judge_award = True
+    vote.judge_comment = "Existing award"
+    db.session.commit()
+    vote_id = vote.id
+    login(voter, judge_contests=[contest.id])
+
+    response = client.post(path, json={
+        "votes": {str(post.id): 3} if with_scores else {}, "judgeAward": award,
+    })
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Invalid judge award"}
+    db.session.expire_all()
+    saved = Vote.query.one()
+    assert (saved.id, saved.post_id, saved.count, saved.is_judge_award, saved.judge_comment) == (
+        vote_id, post.id, 1, True, "Existing award",
+    )
+    assert counts(contest) == (1, 1)
+
+
+@pytest.mark.parametrize("include_null", [False, True])
+@pytest.mark.parametrize("with_scores", [False, True])
+def test_missing_or_null_award_allows_intentional_replacement(
+    client, voting, login, include_null, with_scores
+):
+    contest, voter, post, _, path = voting
+    vote = seed_vote(contest, voter, post, judge=True)
+    vote.is_judge_award = True
+    db.session.commit()
+    login(voter, judge_contests=[contest.id])
+    payload = {"votes": {str(post.id): 3} if with_scores else {}}
+    if include_null:
+        payload["judgeAward"] = None
+
+    assert client.post(path, json=payload).status_code == 200
+    if with_scores:
+        saved = Vote.query.one()
+        assert saved.count == 3
+        assert saved.is_judge_vote is True
+        assert saved.is_judge_award is False
+        assert counts(contest) == (1, 1)
+    else:
+        assert Vote.query.count() == 0
+        assert counts(contest) == (0, 0)
+
+
+@pytest.mark.parametrize("post_id", [0, -1, 2**31, 2**63, 10**100])
+@pytest.mark.parametrize("kind", ["vote", "award"])
+def test_out_of_range_post_id_is_rejected_before_target_query(
+    client, voting, login, post_id, kind
+):
+    contest, voter, post, _, path = voting
+    vote = seed_vote(contest, voter, post, judge=True)
+    vote.is_judge_award = True
+    vote.judge_comment = "Existing award"
+    db.session.commit()
+    vote_id = vote.id
+    login(voter, judge_contests=[contest.id])
+    payload = {"votes": {str(post_id): 1}} if kind == "vote" else {
+        "votes": {}, "judgeAward": {"postId": post_id},
+    }
+    target_queries = []
+
+    def record_sql(_conn, _cursor, statement, _parameters, _context, _executemany):
+        if statement.startswith("SELECT post."):
+            target_queries.append(statement)
+
+    event.listen(db.engine, "before_cursor_execute", record_sql)
+    try:
+        response = client.post(path, json=payload)
+    finally:
+        event.remove(db.engine, "before_cursor_execute", record_sql)
+
+    assert response.status_code == 400
+    assert target_queries == []
+    db.session.expire_all()
+    saved = Vote.query.one()
+    assert (saved.id, saved.post_id, saved.count, saved.is_judge_award, saved.judge_comment) == (
+        vote_id, post.id, 1, True, "Existing award",
+    )
+    assert counts(contest) == (1, 1)
+
+
+@pytest.mark.parametrize("kind", ["vote", "award"])
+def test_post_id_integer_upper_boundary_is_accepted(client, voting, login, kind):
+    contest, voter, post, _, path = voting
+    post.id = 2**31 - 1
+    db.session.commit()
+    login(voter, judge_contests=[contest.id])
+    payload = {"votes": {str(post.id): 1}} if kind == "vote" else {
+        "votes": {}, "judgeAward": {"postId": post.id},
+    }
+
+    assert client.post(path, json=payload).status_code == 200
+    saved = Vote.query.one()
+    assert saved.post_id == post.id
+    assert saved.is_judge_award is (kind == "award")
+    assert counts(contest) == (1, 1)
+
+
 @pytest.mark.parametrize("judge,score,expected", [
     (False, 0, None), (False, 1, 1.0), (False, "1", 1.0), (False, True, 1.0),
     (False, 0.5, None), (False, 2, None), (False, -1, None), (False, None, None),
@@ -53,8 +203,9 @@ def test_score_conversion_range_and_zero(client, voting, login, judge, score, ex
     contest, voter, post, _, path = voting
     login(voter, judge_contests=[contest.id] if judge else [])
     response = client.post(path, json={"votes": {str(post.id): score}})
-    assert response.status_code == 200
-    assert response.get_json() == {"message": "Voted"}
+    invalid = expected is None and (judge or score != 0)
+    assert response.status_code == (400 if invalid else 200)
+    assert response.get_json() == ({"error": "Invalid vote data"} if invalid else {"message": "Voted"})
     rows = Vote.query.all()
     if expected is None:
         assert rows == []
@@ -83,7 +234,7 @@ def test_period_checked_before_replacing_existing_votes(client, voting, fixed_ti
     assert counts(contest) == ((0, 0) if allowed else (1, 0))
 
 
-def test_invalid_ids_missing_posts_and_own_posts_are_skipped_while_foreign_contest_post_is_kept(
+def test_mixed_invalid_ids_and_foreign_posts_reject_entire_submission(
     client, voting, contest_factory, user_factory
 ):
     contest, voter, post, own, path = voting
@@ -94,18 +245,16 @@ def test_invalid_ids_missing_posts_and_own_posts_are_skipped_while_foreign_conte
     response = client.post(path, json={"votes": {
         "invalid": 1, "999": 1, str(own.id): 1, str(post.id): 1, str(foreign_post.id): 1,
     }})
-    assert response.status_code == 200
+    assert response.status_code == 400
     rows = Vote.query.order_by(Vote.post_id).all()
-    assert [(v.post_id, v.contest_id, v.count) for v in rows] == [
-        (post.id, contest.id, 1.0), (foreign_post.id, contest.id, 1.0),
-    ]
-    assert counts(contest) == (1, 0)
+    assert rows == []
+    assert counts(contest) == (0, 0)
     assert counts(foreign) == (0, 0)
 
 
 @pytest.mark.parametrize("score,target", [(None, "post"), (0, "post"), (3, "post"),
                                          (6, "post"), (None, "own")])
-def test_award_fallback_preserves_zero_invalid_score_and_own_target(client, voting, login, score, target):
+def test_award_only_and_zero_are_valid_but_invalid_score_and_own_target_are_rejected(client, voting, login, score, target):
     contest, voter, post, own, path = voting
     selected = post if target == "post" else own
     login(voter, judge_contests=[contest.id])
@@ -113,6 +262,11 @@ def test_award_fallback_preserves_zero_invalid_score_and_own_target(client, voti
         "votes": {} if score is None else {str(selected.id): score},
         "judgeAward": {"postId": selected.id, "comment": " Award\r\n"},
     })
+    if target == "own" or score == 6:
+        assert response.status_code == 400
+        assert Vote.query.count() == 0
+        assert counts(contest) == (0, 0)
+        return
     assert response.status_code == 200
     assert response.get_json() == {"message": "Voted"}
     vote = Vote.query.one()
@@ -239,14 +393,16 @@ def test_failure_rolls_back_replacement_and_preserves_counters(
         payload["judgeAward"] = {"postId": str(post.id), "comment": "award"}
     with caplog.at_level(logging.INFO, logger="app"):
         response = client.post(path, json=payload)
-    assert response.status_code == 500
-    assert response.get_json() == {"error": "Error"}
-    assert events == (["commit", "rollback"] if failure == "commit" else ["rollback"])
+    invalid = failure in ("award_type", "award_string_id")
+    assert response.status_code == (400 if invalid else 500)
+    assert response.get_json() == ({"error": "Invalid judge award"} if invalid else {"error": "Error"})
+    assert events == ([] if invalid else ["commit", "rollback"] if failure == "commit" else ["rollback"])
     vote = Vote.query.one()
     assert (vote.count, vote.is_judge_vote, vote.is_judge_award, vote.judge_comment) == (1, False, False, None)
     assert counts(contest) == (1, 0)
-    assert "==> [submit_votes] ERROR in " in caplog.messages[-1]
-    assert capsys.readouterr().out.startswith("Error: ")
+    if not invalid:
+        assert "==> [submit_votes] ERROR in " in caplog.messages[-1]
+        assert capsys.readouterr().out.startswith("Error: ")
 
 
 def test_database_operation_order_and_log_messages(client, voting, login, monkeypatch, caplog):
@@ -283,7 +439,7 @@ def test_database_operation_order_and_log_messages(client, voting, login, monkey
     finally:
         event.remove(db.engine, "before_cursor_execute", record_sql)
     assert response.status_code == 200
-    assert operations == ["delete old votes", "fetch posts", "insert vote", "update voters", "update judges", "commit"]
+    assert operations == ["fetch posts", "delete old votes", "insert vote", "update voters", "update judges", "commit"]
     assert caplog.messages == [
         f"==> [submit_votes] START for contest {contest.id}",
         "==> [submit_votes] get_or_404 took: 0.0000s",

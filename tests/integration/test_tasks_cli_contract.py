@@ -47,7 +47,7 @@ def observe_effects(monkeypatch):
 
 @pytest.mark.parametrize("event,time_field,flag", EVENTS)
 def test_task_effect_order_commit_counts_and_reexecution(
-    client, contest_factory, user_factory, fixed_time, monkeypatch,
+    task_client, contest_factory, user_factory, fixed_time, monkeypatch,
     event, time_field, flag,
 ):
     author = user_factory("author")
@@ -62,18 +62,18 @@ def test_task_effect_order_commit_counts_and_reexecution(
     events = observe_effects(monkeypatch)
     path = f"/api/tasks/contest/{contest.id}/{event}"
 
-    response = client.post(path)
+    response = task_client.post(path)
     assert response.status_code == 200
     assert response.get_json() == {"message": f"Processed {event}"}
     expected = ["notifications", "commit"]
     if event == "result_announce":
-        expected = ["generate", "results", "commit"] + expected
+        expected = ["generate", "results"] + expected
     assert events == expected
     assert getattr(db.session.get(Contest, contest.id), flag) is True
     # Preserve the current recipient selection, which includes soft-deleted users.
     assert {n.user_id for n in Notification.query.all()} == {author.id, deleted_user.id}
     events.clear()
-    repeat = client.post(path)
+    repeat = task_client.post(path)
     assert repeat.status_code == 200
     assert repeat.get_json() == {
         "message": "Task skipped (time not reached or already processed)"
@@ -83,13 +83,13 @@ def test_task_effect_order_commit_counts_and_reexecution(
 
 @pytest.mark.parametrize("event,time_field,flag", EVENTS)
 def test_task_exact_time_boundary(
-    client, contest_factory, fixed_time, event, time_field, flag
+    task_client, contest_factory, fixed_time, event, time_field, flag
 ):
     contest = contest_factory(NOW, NOW + timedelta(hours=1), NOW + timedelta(hours=2))
     event_time = getattr(contest, time_field).replace(tzinfo=timezone.utc)
     path = f"/api/tasks/contest/{contest.id}/{event}"
     fixed_time(event_time - timedelta(microseconds=1))
-    before = client.post(path)
+    before = task_client.post(path)
     assert before.status_code == 200
     assert before.get_json() == {
         "message": "Task skipped (time not reached or already processed)"
@@ -97,22 +97,22 @@ def test_task_exact_time_boundary(
     assert getattr(db.session.get(Contest, contest.id), flag) is False
 
     fixed_time(event_time)
-    reached = client.post(path)
+    reached = task_client.post(path)
     assert reached.status_code == 200
     assert reached.get_json() == {"message": f"Processed {event}"}
     assert getattr(db.session.get(Contest, contest.id), flag) is True
 
 
 def test_missing_contest_and_unknown_task_do_not_commit(
-    client, contest_factory, fixed_time, monkeypatch
+    task_client, contest_factory, fixed_time, monkeypatch
 ):
     contest = contest_factory(NOW, NOW + timedelta(hours=1), NOW + timedelta(hours=2))
     fixed_time(NOW)
     events = observe_effects(monkeypatch)
-    missing = client.post("/api/tasks/contest/999/post_start")
+    missing = task_client.post("/api/tasks/contest/999/post_start")
     assert missing.status_code == 404
     assert missing.get_json() == {"error": "Contest not found"}
-    unknown = client.post(f"/api/tasks/contest/{contest.id}/unknown")
+    unknown = task_client.post(f"/api/tasks/contest/{contest.id}/unknown")
     assert unknown.status_code == 200
     assert unknown.get_json() == {
         "message": "Task skipped (time not reached or already processed)"
@@ -143,7 +143,7 @@ def test_process_contests_commit_order_and_cleanup_boundary(
     result = runner.invoke(args=["process-contests"])
     assert result.exit_code == 0, result.output
     assert events == [
-        "contest_post_start", "contest_voting_start", "generate", "results", "commit",
+        "contest_post_start", "contest_voting_start", "generate", "results",
         "contest_result_announce", "commit", "commit",
     ]
     assert "Deleted 1 old notifications (older than 30 days)" in result.output
@@ -241,7 +241,7 @@ def test_empty_stats_batch_keeps_single_commit(runner, monkeypatch):
 
 @pytest.mark.parametrize("entry_point", ("task", "app.cli"))
 def test_result_generation_failure_propagates_before_notification_commit(
-    client, runner, contest_factory, fixed_time, monkeypatch, entry_point
+    task_client, runner, contest_factory, fixed_time, monkeypatch, entry_point
 ):
     contest = contest_factory(
         NOW - timedelta(hours=3), NOW - timedelta(hours=2), NOW - timedelta(hours=1),
@@ -250,14 +250,14 @@ def test_result_generation_failure_propagates_before_notification_commit(
     fixed_time(NOW)
     events = observe_effects(monkeypatch)
 
-    def fail_generation(_contest_id):
+    def fail_generation(_contest_id, **_kwargs):
         events.append("generate failure")
         raise RuntimeError("generation failed")
 
     monkeypatch.setattr(results_service, "generate_contest_results", fail_generation)
     if entry_point == "task":
         with pytest.raises(RuntimeError, match="generation failed"):
-            client.post(f"/api/tasks/contest/{contest.id}/result_announce")
+            task_client.post(f"/api/tasks/contest/{contest.id}/result_announce")
     else:
         result = runner.invoke(args=["process-contests"])
         assert result.exit_code == 1

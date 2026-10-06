@@ -127,7 +127,7 @@ def test_session_truthiness_and_unknown_user_keep_query_behavior(client, entries
     reads = observe_reads(monkeypatch)
     payload = client.get(f"/api/contests/{entries.c.id}/posts").get_json()
     assert payload["userHasVotedInContest"] is False
-    assert reads == (["Post", "Vote", "Comment"] if user_id else ["Post"])
+    assert reads == ["Post"]
 
 
 @pytest.mark.parametrize("signed_in", (False, True))

@@ -4,8 +4,20 @@ import logging
 
 from flask import jsonify, request, session
 
+from app.models import User, db
+
 
 logger = logging.getLogger("app")
+
+
+def invalidate_stale_user_session():
+    """Validate signed user sessions against current persisted account state."""
+    if "user_id" not in session:
+        return
+    user_id = session["user_id"]
+    user = db.session.get(User, user_id) if type(user_id) is int and 0 < user_id < 2**63 else None
+    if user is None or user.deleted_at is not None:
+        session.clear()
 
 
 def request_entity_too_large(_error):
@@ -26,12 +38,8 @@ def log_request_info():
     if request.path.startswith("/api/login") or request.path.startswith(
         "/api/callback"
     ):
-        logger.info(f"=== REQUEST START: {request.path} ===")
-        logger.info(f"Headers: {dict(request.headers)}")
-        logger.info(f"Cookies sent from browser: {request.cookies}")
-        logger.info(f"Session (before processing): {dict(session)}")
-        logger.info(f"X-Forwarded-Proto: {request.headers.get('X-Forwarded-Proto')}")
-        logger.info(f"Is Secure (Flask detected): {request.is_secure}")
+        logger.info("OAuth request started; endpoint=%s; secure=%s",
+                    request.endpoint, request.is_secure)
 
 
 def add_cache_control_headers(response):
@@ -46,5 +54,6 @@ def add_cache_control_headers(response):
 
 def register_hooks(app):
     app.register_error_handler(413, request_entity_too_large)
+    app.before_request(invalidate_stale_user_session)
     app.before_request(log_request_info)
     app.after_request(add_cache_control_headers)

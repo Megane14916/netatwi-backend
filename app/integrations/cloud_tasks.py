@@ -3,11 +3,36 @@
 import os
 from datetime import datetime, timedelta, timezone
 
+from flask import current_app, request
+from google.auth import exceptions as auth_exceptions
+from google.auth.transport.requests import Request
+from google.oauth2 import id_token
+
 from google.cloud import tasks_v2
 from google.protobuf import timestamp_pb2
 
 
 _cloud_tasks_client = None
+
+
+def authenticate_task_request():
+    audience = current_app.config.get("TASKS_OIDC_AUDIENCE")
+    caller = current_app.config.get("TASKS_SERVICE_ACCOUNT_EMAIL")
+    if not audience or not caller:
+        return {"error": "Task authentication is not configured"}, 503
+    parts = request.headers.get("Authorization", "").split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return {"error": "Task authentication required"}, 401
+    try:
+        claims = id_token.verify_oauth2_token(parts[1], Request(), audience=audience)
+    except auth_exceptions.TransportError:
+        current_app.logger.warning("Task token verification unavailable")
+        return {"error": "Task authentication unavailable"}, 503
+    except (ValueError, auth_exceptions.GoogleAuthError):
+        return {"error": "Invalid task token"}, 401
+    if claims.get("email_verified") is not True or claims.get("email") != caller:
+        return {"error": "Task caller not authorized"}, 403
+    return None
 
 
 def schedule_contest_task(contest_id, event_type, schedule_time):
@@ -16,10 +41,15 @@ def schedule_contest_task(contest_id, event_type, schedule_time):
     location = os.environ.get("GCP_LOCATION")
     queue = os.environ.get("GCP_QUEUE_NAME")
     handler_url = os.environ.get("TASK_HANDLER_URL") or os.environ.get("GCR_URL")
+    audience = os.environ.get("TASKS_OIDC_AUDIENCE")
+    service_account = os.environ.get("TASKS_SERVICE_ACCOUNT_EMAIL")
 
     if not all([project, location, queue, handler_url]):
         print(f"Skipping task scheduling for {event_type} - GCP configuration missing.")
         return
+
+    if not audience or not service_account:
+        raise ValueError("Cloud Tasks OIDC audience and service account are required")
 
     if _cloud_tasks_client is None:
         _cloud_tasks_client = tasks_v2.CloudTasksClient()
@@ -33,6 +63,7 @@ def schedule_contest_task(contest_id, event_type, schedule_time):
             "http_method": tasks_v2.HttpMethod.POST,
             "url": url,
             "headers": {"Content-type": "application/json"},
+            "oidc_token": {"service_account_email": service_account, "audience": audience},
         }
     }
 

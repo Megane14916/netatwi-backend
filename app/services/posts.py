@@ -5,39 +5,144 @@ The route retains response serialization and the original exception boundary.
 """
 
 from datetime import datetime, timezone
+from contextlib import contextmanager
+import json
+
+from flask import current_app
+from itsdangerous import URLSafeSerializer
 
 from app.runtime_dependencies import (
     allowed_file,
     calculate_weighted_length,
     delete_file,
     save_file,
+    route_logger as logger,
 )
 from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, Vote, db
 
 
+def _cleanup_signer():
+    return URLSafeSerializer(current_app.config["SECRET_KEY"], salt="netatwi-image-cleanup")
+
+
+def cleanup_images(urls):
+    """Best-effort compensation; retain a signed proof for failed deletions."""
+    failures = []
+    for url in dict.fromkeys(urls):
+        try:
+            if _image_is_referenced(url):
+                raise ValueError("Image still referenced")
+            delete_file(url)
+        except Exception:
+            failures.append(url)
+            logger.error("IMAGE_CLEANUP_PENDING %s", json.dumps({"url": url, "token": _cleanup_signer().dumps(url)}))
+    return failures
+
+
+def retry_image_cleanup(token):
+    url = _cleanup_signer().loads(token)
+    if not isinstance(url, str) or not url:
+        raise ValueError("Invalid cleanup URL")
+    return not cleanup_images([url])
+
+
+def _image_is_referenced(url):
+    return any(isinstance(post.images, list) and url in post.images
+               for post in Post.query.filter(Post.image_urls.isnot(None)).all())
+
+
+@contextmanager
+def _compensate_uploads():
+    urls = []
+    try:
+        yield urls
+    except Exception as error:
+        failed_url = getattr(error, "uploaded_image_url", None)
+        if failed_url:
+            urls.append(failed_url)
+        try:
+            db.session.rollback()
+        finally:
+            cleanup_images(urls)
+        raise
+
+
+def _other_image_references(post):
+    references = set()
+    for other in Post.query.filter(Post.id != post.id, Post.image_urls.isnot(None)).all():
+        if isinstance(other.images, list):
+            references.update(url for url in other.images if isinstance(url, str))
+    return references
+
+
+def owned_image_deletions(post, urls):
+    """Only delete proven uploads that no other post still references."""
+    if not urls:
+        return []
+    owned = set(post.owned_images)
+    shared = _other_image_references(post)
+    deletions = []
+    for url in dict.fromkeys(urls):
+        if url in owned and url not in shared:
+            deletions.append(url)
+        else:
+            logger.warning("Image deletion skipped without exclusive upload ownership; post_id=%s; url=%s", post.id, url)
+    return deletions
+
+
 def validate_submission(content, files):
-    if not content and not files:
+    valid_files = _valid_image_files(files)
+    if any(f and f.filename and not allowed_file(f.filename) for f in files):
+        return {"error": "Unsupported image extension"}, 400
+    if not content and not valid_files:
         return ({"error": "Content or images required"}), 400
 
     # 画像枚数制限
-    if len(files) > 4:
+    if len(valid_files) > 4:
         return ({"error": "Max 4 images allowed"}), 400
+
+    if content and calculate_weighted_length(content) > 280:
+        return {"error": "Text too long (max 280)"}, 400
 
     return None
 
 
 def prepare_update(new_content, kept_images, files):
+    if not isinstance(kept_images, list) or any(not isinstance(url, str) for url in kept_images):
+        return new_content, (({"error": "Invalid kept images"}), 400)
+    # Image-only edits store an empty string because Post.content is NOT NULL.
+    if new_content is None:
+        new_content = ""
+    if not isinstance(new_content, str):
+        return new_content, ({"error": "Invalid content"}, 400)
+    if any(f and f.filename and not allowed_file(f.filename) for f in files):
+        return new_content, ({"error": "Unsupported image extension"}, 400)
+    valid_files = _valid_image_files(files)
+    if len(kept_images) + len(valid_files) > 4:
+        return new_content, ({"error": "Max 4 images allowed"}, 400)
     if new_content:
         new_content = new_content.replace("\r\n", "\n").replace("\r", "\n")
 
     # テキストも画像もなければエラー（ただし画像全削除＆テキストありはOK）
-    if not new_content and not kept_images and not files:
+    if not new_content and not kept_images and not valid_files:
         return new_content, (({"error": "No content"}), 400)
 
     if new_content and calculate_weighted_length(new_content) > 280:
         return new_content, (({"error": "Text too long (max 280)"}), 400)
 
     return new_content, None
+
+
+def _valid_image_files(files):
+    return [file for file in files if file and file.filename and allowed_file(file.filename)]
+
+
+def _upload_images(files, urls):
+    for file in files:
+        url = save_file(file)
+        if not isinstance(url, str) or not url:
+            raise ValueError("Image storage returned no URL")
+        urls.append(url)
 
 
 def submit_post(id, user_id, content, files):
@@ -51,9 +156,11 @@ def submit_post(id, user_id, content, files):
         return ({"error": "Outside period"}), 403
 
     # 画像必須のバリデーション
-    valid_files = [f for f in files if f and f.filename]
+    valid_files = _valid_image_files(files)
     if c.image_rule == "required" and len(valid_files) == 0:
         return ({"error": "画像を最低1枚添付してください"}), 400
+    if c.image_rule == "none" and valid_files:
+        return {"error": "Images are not allowed in this contest"}, 400
 
     # 決勝コンテストの場合の進出者チェック
     if c.parent_contest_id:
@@ -69,21 +176,14 @@ def submit_post(id, user_id, content, files):
         return ({"error": "Already posted"}), 409
 
     # 画像アップロード処理
-    image_urls = []
-    for file in valid_files:
-        if allowed_file(file.filename):
-            url = save_file(file)
-            image_urls.append(url)
-
-    # Post作成 (images setter経由で保存)
-    new_post = Post(content=content, contest_id=id, user_id=user_id)
-    new_post.images = image_urls  # JSON化して保存される
-
-    # カウンタのアトミックなインクリメント（レースコンディション対策）
-    Contest.query.filter_by(id=id).update({"post_count": Contest.post_count + 1})
-
-    db.session.add(new_post)
-    db.session.commit()
+    with _compensate_uploads() as image_urls:
+        _upload_images(valid_files, image_urls)
+        new_post = Post(content=content, contest_id=id, user_id=user_id)
+        new_post.images = image_urls
+        new_post.record_image_uploads(image_urls)
+        Contest.query.filter_by(id=id).update({"post_count": Contest.post_count + 1})
+        db.session.add(new_post)
+        db.session.commit()
 
     return new_post, 201
 
@@ -91,7 +191,7 @@ def submit_post(id, user_id, content, files):
 def update_post(contest_id, post_id, user_id, new_content, kept_images, files):
     post_to_edit = Post.query.filter_by(
         id=post_id, user_id=user_id, contest_id=contest_id
-    ).first()
+    ).with_for_update().first()
     if not post_to_edit:
         return ({"error": "Not found"}), 404
     c = Contest.query.get(contest_id)
@@ -105,39 +205,35 @@ def update_post(contest_id, post_id, user_id, new_content, kept_images, files):
 
     # 1. 既存画像 (old_images) の取得
     old_images = post_to_edit.images or []
+    if (not isinstance(kept_images, list)
+            or any(not isinstance(url, str) for url in kept_images)
+            or len(set(kept_images)) != len(kept_images)
+            or any(url not in old_images for url in kept_images)
+            or (kept_images and set(kept_images) & _other_image_references(post_to_edit))):
+        return ({"error": "Invalid kept images"}), 400
 
-    # 2. 新しい画像リスト (final_images) の構築
-    final_images = []
-    # 維持する画像 (kept_images) を追加
-    if kept_images:
-        final_images.extend(kept_images)
+    valid_files = _valid_image_files(files)
+    if c.image_rule == "required" and not kept_images and not valid_files:
+        return {"error": "画像を最低1枚添付してください"}, 400
+    if c.image_rule == "none" and (kept_images or valid_files):
+        return {"error": "Images are not allowed in this contest"}, 400
 
-    # 新規アップロード画像を追加
-    if files:
-        for file in files:
-            if file and allowed_file(file.filename):
-                url = save_file(file)
-                final_images.append(url)
-
-    # 3. 削除された画像を特定してストレージから削除
-    # old_images にはあるが、final_images にはないもの
-    for old_url in old_images:
-        if old_url not in final_images:
-            delete_file(old_url)
-
-    # 4. DB更新
-    post_to_edit.content = new_content
-    post_to_edit.images = final_images
-    post_to_edit.updated_at = datetime.now(timezone.utc)
-
-    db.session.commit()
+    deletions = owned_image_deletions(post_to_edit, [url for url in old_images if url not in kept_images])
+    with _compensate_uploads() as uploaded_images:
+        _upload_images(valid_files, uploaded_images)
+        post_to_edit.content = new_content
+        post_to_edit.images = kept_images + uploaded_images
+        post_to_edit.record_image_uploads(uploaded_images)
+        post_to_edit.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+    cleanup_images(deletions)
     return post_to_edit, 200
 
 
 def delete_post(contest_id, post_id, user_id):
     post_to_delete = Post.query.filter_by(
         id=post_id, user_id=user_id, contest_id=contest_id
-    ).first()
+    ).with_for_update().first()
     if not post_to_delete:
         return ({"error": "Not found"}), 404
 
@@ -150,12 +246,7 @@ def delete_post(contest_id, post_id, user_id):
     ):
         return ({"error": "Outside period"}), 403
 
-    if post_to_delete.images:
-        for url in post_to_delete.images:
-            try:
-                delete_file(url)
-            except:
-                pass
+    deletions = owned_image_deletions(post_to_delete, post_to_delete.images)
 
     Vote.query.filter_by(post_id=post_id).delete()
     Comment.query.filter_by(post_id=post_id).delete()
@@ -171,4 +262,5 @@ def delete_post(contest_id, post_id, user_id):
     )
 
     db.session.commit()
+    cleanup_images(deletions)
     return ({"message": "Deleted successfully"}), 200

@@ -26,6 +26,8 @@ os.environ.update(
         "GCP_QUEUE_NAME": "",
         "TASK_HANDLER_URL": "",
         "GCR_URL": "",
+        "TASKS_OIDC_AUDIENCE": "",
+        "TASKS_SERVICE_ACCOUNT_EMAIL": "",
     }
 )
 
@@ -82,6 +84,42 @@ def app():
 @pytest.fixture
 def client(app):
     return app.test_client()
+
+
+@pytest.fixture(scope="session")
+def task_signing_keys():
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization
+    private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    private_pem = private.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+    public_pem = private.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+    return public_pem, private_pem
+
+
+@pytest.fixture
+def signed_task_headers(app, monkeypatch, task_signing_keys):
+    import time
+    from google.auth import jwt, crypt
+    public, private = task_signing_keys
+    app.config.update(TASKS_OIDC_AUDIENCE="https://backend.example",
+                      TASKS_SERVICE_ACCOUNT_EMAIL="tasks@example.iam.gserviceaccount.com")
+    monkeypatch.setattr(cloud_tasks.id_token, "_fetch_certs", lambda *_args: {"test-key": public.decode()})
+    signer = crypt.RSASigner.from_string(private, key_id="test-key")
+    def make(**overrides):
+        now = int(time.time())
+        claims = dict(iss="https://accounts.google.com", aud=app.config["TASKS_OIDC_AUDIENCE"],
+                      sub="test-service-account-id", email=app.config["TASKS_SERVICE_ACCOUNT_EMAIL"],
+                      email_verified=True, iat=now - 5, exp=now + 3600)
+        claims.update(overrides)
+        return {"Authorization": "Bearer " + jwt.encode(signer, claims).decode()}
+    return make
+
+
+@pytest.fixture
+def task_client(app, signed_task_headers):
+    client = app.test_client()
+    client.environ_base["HTTP_AUTHORIZATION"] = signed_task_headers()["Authorization"]
+    return client
 
 
 @pytest.fixture
@@ -189,4 +227,6 @@ def fake_cloud_tasks(monkeypatch):
     monkeypatch.setenv("GCP_LOCATION", "test")
     monkeypatch.setenv("GCP_QUEUE_NAME", "test")
     monkeypatch.setenv("TASK_HANDLER_URL", "https://backend.example")
+    monkeypatch.setenv("TASKS_OIDC_AUDIENCE", "https://backend.example")
+    monkeypatch.setenv("TASKS_SERVICE_ACCOUNT_EMAIL", "tasks@example.iam.gserviceaccount.com")
     return client

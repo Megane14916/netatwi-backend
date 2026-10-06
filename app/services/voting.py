@@ -11,6 +11,17 @@ from app.runtime_dependencies import calculate_weighted_length, route_logger as 
 from app.models import Contest, Post, Vote, db
 
 
+# Post.id uses PostgreSQL INTEGER (signed 32-bit), including in migrations.
+_MAX_POST_ID = 2**31 - 1
+
+
+def _normalize_post_id(value):
+    post_id = int(value)
+    if not 0 < post_id <= _MAX_POST_ID:
+        raise ValueError("Post ID out of range")
+    return post_id
+
+
 def validate_votes(content, votes_to_submit):
     if content:
         content = content.replace("\r\n", "\n").replace("\r", "\n")
@@ -42,6 +53,45 @@ def submit_votes(
     ):
         return ({"error": "Outside period"}), 403
 
+    # Validate every target and score before replacing any existing rows.
+    max_score = c.judge_max_score if is_judge else 1
+    normalized_votes = {}
+    try:
+        for pid_str, count_val in votes_to_submit.items():
+            post_id = _normalize_post_id(pid_str)
+            if post_id in normalized_votes:
+                raise ValueError
+            count = float(count_val)
+            if is_judge_voting_now:
+                if not 0 <= count <= max_score:
+                    raise ValueError
+            elif count not in (0, 1):
+                raise ValueError
+            normalized_votes[post_id] = count
+    except (ValueError, TypeError, OverflowError):
+        return ({"error": "Invalid vote data"}), 400
+
+    award_pid = None
+    if is_judge_voting_now and judge_award is not None:
+        if not isinstance(judge_award, dict):
+            return ({"error": "Invalid judge award"}), 400
+        award_pid = judge_award.get("postId")
+        if type(award_pid) is not int:
+            return ({"error": "Invalid judge award"}), 400
+        try:
+            award_pid = _normalize_post_id(award_pid)
+        except ValueError:
+            return ({"error": "Invalid judge award"}), 400
+
+    target_ids = set(normalized_votes)
+    if award_pid is not None:
+        target_ids.add(award_pid)
+    posts_map = {p.id: p for p in Post.query.filter(
+        Post.contest_id == id, Post.id.in_(target_ids)
+    ).all()} if target_ids else {}
+    if set(posts_map) != target_ids or any(p.user_id == user_id for p in posts_map.values()):
+        return ({"error": "Invalid vote target"}), 400
+
     # --- キャッシュスタンピード対策のカウンタ更新用 ---
     previous_votes = Vote.query.filter_by(user_id=user_id, contest_id=id).all()
     was_voter = len(previous_votes) > 0
@@ -52,91 +102,44 @@ def submit_votes(
     t2 = time.time()
     logger.info(f"==> [submit_votes] delete took: {t2 - t1:.4f}s")
 
-    max_score = c.judge_max_score if is_judge else 1
-
     # --- 投票データの保存 ---
     # 1. 点数投票の保存
     # N+1問題を回避するため、事前に対象のPostをバルク取得
-    post_ids_to_fetch = []
-    for pid_str in votes_to_submit.keys():
-        try:
-            post_ids_to_fetch.append(int(pid_str))
-        except ValueError:
-            pass
-
-    posts_map = {}
-    if post_ids_to_fetch:
-        fetched_posts = Post.query.filter(Post.id.in_(post_ids_to_fetch)).all()
-        for p in fetched_posts:
-            posts_map[p.id] = p
-
     processed_post_ids = set()
-    for pid_str, count_val in votes_to_submit.items():
-        try:
-            post_id = int(pid_str)
-
-            # 自分の投稿への投票を禁止（事前取得したマップから検索）
-            post = posts_map.get(post_id)
-            if not post or post.user_id == user_id:
-                continue
-
-            count = float(count_val)
-            if is_judge_voting_now:
-                if not (0 <= count <= max_score):
-                    raise ValueError
-            else:
-                if count not in (0, 1):
-                    raise ValueError
-
-            # 審査員賞の対象かどうか
-            is_award = False
-            comment = None
-            if (
-                is_judge_voting_now
-                and judge_award
-                and judge_award.get("postId") == post_id
-            ):
-                is_award = True
-                comment = judge_award.get("comment")
-
-            # 投票数が正、または審査員賞であれば保存
-            if count > 0 or is_award or (is_judge_voting_now and count == 0):
-                db.session.add(
-                    Vote(
-                        user_id=user_id,
-                        post_id=post_id,
-                        contest_id=id,
-                        count=count,
-                        is_judge_vote=is_judge_voting_now,
-                        is_judge_award=is_award,
-                        judge_comment=comment,
-                    )
-                )
-                processed_post_ids.add(post_id)
-        except (ValueError, TypeError):
-            continue
-
-    # 2. 審査員賞が選択されているが、点数が0点(votesに含まれない/0)の場合のフォロー
-    if is_judge_voting_now and judge_award:
-        award_pid = judge_award.get("postId")
-        if award_pid and award_pid not in processed_post_ids:
-            # 0点で賞だけあげるケース
+    for post_id, count in normalized_votes.items():
+        is_award = is_judge_voting_now and award_pid == post_id
+        comment = judge_award.get("comment") if is_award else None
+        if count > 0 or is_award or (is_judge_voting_now and count == 0):
             db.session.add(
                 Vote(
                     user_id=user_id,
-                    post_id=award_pid,
+                    post_id=post_id,
                     contest_id=id,
-                    count=0,
-                    is_judge_vote=True,
-                    is_judge_award=True,
-                    judge_comment=judge_award.get("comment"),
+                    count=count,
+                    is_judge_vote=is_judge_voting_now,
+                    is_judge_award=is_award,
+                    judge_comment=comment,
                 )
             )
+            processed_post_ids.add(post_id)
+
+    # 2. 審査員賞が選択されているが、点数が0点(votesに含まれない/0)の場合のフォロー
+    if award_pid is not None and award_pid not in processed_post_ids:
+        # 0点で賞だけあげるケース
+        db.session.add(
+            Vote(
+                user_id=user_id,
+                post_id=award_pid,
+                contest_id=id,
+                count=0,
+                is_judge_vote=True,
+                is_judge_award=True,
+                judge_comment=judge_award.get("comment"),
+            )
+        )
 
     # --- キャッシュスタンピード対策のカウンタ更新用 ---
-    is_now_voter = bool(processed_post_ids) or (
-        is_judge_voting_now and judge_award and judge_award.get("postId")
-    )
+    is_now_voter = bool(processed_post_ids) or award_pid is not None
     is_now_judge_voter = bool(is_now_voter and is_judge_voting_now)
 
     if not was_voter and is_now_voter:

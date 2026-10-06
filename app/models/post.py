@@ -25,14 +25,40 @@ class Post(db.Model):
     def images(self):
         if self.image_urls:
             try:
-                return json.loads(self.image_urls)
+                data = json.loads(self.image_urls)
+                if isinstance(data, dict) and data.get("netatwi_image_manifest") == 1:
+                    return data["urls"]
+                return data
             except:
                 return []
         return []
 
     @images.setter
     def images(self, value):
+        owned = self.owned_images
         if value:
-            self.image_urls = json.dumps(value)
+            self.image_urls = json.dumps(
+                {"netatwi_image_manifest": 1, "urls": value,
+                 "owned": [url for url in owned if url in value]}
+                if owned else value
+            )
         else:
             self.image_urls = None
+
+    @property
+    def owned_images(self):
+        """Legacy URL lists are readable, but do not prove upload ownership."""
+        try:
+            data = json.loads(self.image_urls or "null")
+            if isinstance(data, dict) and data.get("netatwi_image_manifest") == 1:
+                return [url for url in data.get("owned", []) if url in data["urls"]]
+        except (ValueError, TypeError, KeyError):
+            pass
+        return []
+
+    def record_image_uploads(self, urls):
+        """Called only for URLs returned by server-side uploads for this post."""
+        images = self.images
+        owned = list(dict.fromkeys(self.owned_images + [url for url in urls if url in images]))
+        if owned:
+            self.image_urls = json.dumps({"netatwi_image_manifest": 1, "urls": images, "owned": owned})
