@@ -6,4 +6,5 @@ import sys
 _target = import_module("app.cli")
 sys.modules[__name__ + ".process_contests"] = import_module("app.cli.process_contests")
 sys.modules[__name__ + ".user_stats"] = import_module("app.cli.user_stats")
+sys.modules[__name__ + ".image_cleanup"] = import_module("app.cli.image_cleanup")
 sys.modules[__name__] = _target

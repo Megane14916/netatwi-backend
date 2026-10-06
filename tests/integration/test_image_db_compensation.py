@@ -48,6 +48,8 @@ def test_db_failure_keeps_old_files_and_removes_new_uploads(
     else:
         assert Post.query.count() == 0
 
+    assert db.session.get(Contest, contest_id).post_count == (1 if post else 0)
+
 
 def test_failed_cleanup_logs_signed_retry_and_retry_is_idempotent(app, runner, monkeypatch, caplog):
     delete = Mock(side_effect=RuntimeError("storage unavailable"))
@@ -130,7 +132,6 @@ def test_storage_partial_failure_retains_generated_cleanup_url(app, tmp_path, us
         assert storage.delete_object.call_count == 2
     else:
         assert list(tmp_path.iterdir()) == []
-    assert db.session.get(Contest, contest_id).post_count == (1 if post else 0)
 
 
 @pytest.mark.parametrize("method", ["post", "put"])
