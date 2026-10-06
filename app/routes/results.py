@@ -5,10 +5,10 @@ import traceback
 from flask import jsonify, session
 
 from app.services import results as results_service
-from .legacy import LegacyEndpointBlueprint
+from flask import Blueprint
 
 
-bp = LegacyEndpointBlueprint("results", __name__)
+bp = Blueprint("results", __name__)
 
 
 @bp.route("/api/contests/<int:id>/results")

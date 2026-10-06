@@ -8,10 +8,10 @@ from flask import jsonify, request, session
 from app.models import db
 from app.services import posts as post_service
 from app.services import contest_posts as contest_post_service
-from .legacy import LegacyEndpointBlueprint
+from flask import Blueprint
 
 
-bp = LegacyEndpointBlueprint("posts", __name__)
+bp = Blueprint("posts", __name__)
 JST = timezone(timedelta(hours=9), "JST")
 
 

@@ -305,7 +305,7 @@ def test_task_and_cli_registration_preserve_compatibility_names(app):
     assert app_module.update_user_stats is update_user_stats
     for application in (app_module.app, app):
         assert "tasks" in application.blueprints
-        assert application.view_functions["handle_contest_task"] is handle_contest_task
+        assert application.view_functions["tasks.handle_contest_task"] is handle_contest_task
         assert application.cli.commands["process-contests"] is process_contests_command
         assert application.cli.commands["update-user-stats"] is update_user_stats
         assert process_contests_command.callback.__module__ == "app.cli.process_contests"

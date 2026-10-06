@@ -2,10 +2,10 @@
 
 from flask import jsonify, session
 from app.services import notifications as notifications_service
-from .legacy import LegacyEndpointBlueprint
+from flask import Blueprint
 
 
-bp = LegacyEndpointBlueprint("notifications", __name__)
+bp = Blueprint("notifications", __name__)
 
 
 @bp.route("/api/notifications", methods=["GET"])

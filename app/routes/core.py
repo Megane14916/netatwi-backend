@@ -1,9 +1,9 @@
 """Basic backend entry route."""
 
-from .legacy import LegacyEndpointBlueprint
+from flask import Blueprint
 
 
-bp = LegacyEndpointBlueprint("core", __name__)
+bp = Blueprint("core", __name__)
 
 
 # --- Mock API Endpoints ---

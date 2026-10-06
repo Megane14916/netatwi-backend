@@ -5,10 +5,10 @@ from flask import jsonify, request, session
 from app.models import db
 from app.services import voting as voting_service
 from app.runtime_dependencies import route_logger as logger
-from .legacy import LegacyEndpointBlueprint
+from flask import Blueprint
 
 
-bp = LegacyEndpointBlueprint("voting", __name__)
+bp = Blueprint("voting", __name__)
 
 
 @bp.route("/api/contests/<int:id>/vote", methods=["POST"])

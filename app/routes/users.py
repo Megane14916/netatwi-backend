@@ -3,10 +3,10 @@
 from flask import jsonify, request
 
 from app.services import users as user_service
-from .legacy import LegacyEndpointBlueprint
+from flask import Blueprint
 
 
-bp = LegacyEndpointBlueprint("users", __name__)
+bp = Blueprint("users", __name__)
 
 
 @bp.route("/api/users", methods=["GET"])

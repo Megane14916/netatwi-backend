@@ -4,10 +4,10 @@ from flask import jsonify
 
 from app.services import contest_lifecycle
 from app.integrations.cloud_tasks import authenticate_task_request
-from .legacy import LegacyEndpointBlueprint
+from flask import Blueprint
 
 
-bp = LegacyEndpointBlueprint("tasks", __name__)
+bp = Blueprint("tasks", __name__)
 
 
 @bp.route("/api/tasks/contest/<int:id>/<event_type>", methods=["POST"])

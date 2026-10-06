@@ -7,10 +7,10 @@ from sqlalchemy.exc import IntegrityError
 
 from app.models import db
 from app.services import interactions as interaction_service
-from .legacy import LegacyEndpointBlueprint
+from flask import Blueprint
 
 
-bp = LegacyEndpointBlueprint("interactions", __name__)
+bp = Blueprint("interactions", __name__)
 
 
 @bp.route("/api/posts/<int:post_id>/bookmark", methods=["PUT", "DELETE"])
