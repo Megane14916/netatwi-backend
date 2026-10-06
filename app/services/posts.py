@@ -91,12 +91,18 @@ def owned_image_deletions(post, urls):
 
 
 def validate_submission(content, files):
-    if not content and not files:
+    valid_files = _valid_image_files(files)
+    if any(f and f.filename and not allowed_file(f.filename) for f in files):
+        return {"error": "Unsupported image extension"}, 400
+    if not content and not valid_files:
         return ({"error": "Content or images required"}), 400
 
     # 画像枚数制限
-    if len(files) > 4:
+    if len(valid_files) > 4:
         return ({"error": "Max 4 images allowed"}), 400
+
+    if content and calculate_weighted_length(content) > 280:
+        return {"error": "Text too long (max 280)"}, 400
 
     return None
 
@@ -104,17 +110,36 @@ def validate_submission(content, files):
 def prepare_update(new_content, kept_images, files):
     if not isinstance(kept_images, list) or any(not isinstance(url, str) for url in kept_images):
         return new_content, (({"error": "Invalid kept images"}), 400)
+    if new_content is not None and not isinstance(new_content, str):
+        return new_content, ({"error": "Invalid content"}, 400)
+    if any(f and f.filename and not allowed_file(f.filename) for f in files):
+        return new_content, ({"error": "Unsupported image extension"}, 400)
+    valid_files = _valid_image_files(files)
+    if len(kept_images) + len(valid_files) > 4:
+        return new_content, ({"error": "Max 4 images allowed"}, 400)
     if new_content:
         new_content = new_content.replace("\r\n", "\n").replace("\r", "\n")
 
     # テキストも画像もなければエラー（ただし画像全削除＆テキストありはOK）
-    if not new_content and not kept_images and not files:
+    if not new_content and not kept_images and not valid_files:
         return new_content, (({"error": "No content"}), 400)
 
     if new_content and calculate_weighted_length(new_content) > 280:
         return new_content, (({"error": "Text too long (max 280)"}), 400)
 
     return new_content, None
+
+
+def _valid_image_files(files):
+    return [file for file in files if file and file.filename and allowed_file(file.filename)]
+
+
+def _upload_images(files, urls):
+    for file in files:
+        url = save_file(file)
+        if not isinstance(url, str) or not url:
+            raise ValueError("Image storage returned no URL")
+        urls.append(url)
 
 
 def submit_post(id, user_id, content, files):
@@ -128,9 +153,11 @@ def submit_post(id, user_id, content, files):
         return ({"error": "Outside period"}), 403
 
     # 画像必須のバリデーション
-    valid_files = [f for f in files if f and f.filename]
+    valid_files = _valid_image_files(files)
     if c.image_rule == "required" and len(valid_files) == 0:
         return ({"error": "画像を最低1枚添付してください"}), 400
+    if c.image_rule == "none" and valid_files:
+        return {"error": "Images are not allowed in this contest"}, 400
 
     # 決勝コンテストの場合の進出者チェック
     if c.parent_contest_id:
@@ -147,9 +174,7 @@ def submit_post(id, user_id, content, files):
 
     # 画像アップロード処理
     with _compensate_uploads() as image_urls:
-        for file in valid_files:
-            if allowed_file(file.filename):
-                image_urls.append(save_file(file))
+        _upload_images(valid_files, image_urls)
         new_post = Post(content=content, contest_id=id, user_id=user_id)
         new_post.images = image_urls
         new_post.record_image_uploads(image_urls)
@@ -184,11 +209,15 @@ def update_post(contest_id, post_id, user_id, new_content, kept_images, files):
             or (kept_images and set(kept_images) & _other_image_references(post_to_edit))):
         return ({"error": "Invalid kept images"}), 400
 
+    valid_files = _valid_image_files(files)
+    if c.image_rule == "required" and not kept_images and not valid_files:
+        return {"error": "画像を最低1枚添付してください"}, 400
+    if c.image_rule == "none" and (kept_images or valid_files):
+        return {"error": "Images are not allowed in this contest"}, 400
+
     deletions = owned_image_deletions(post_to_edit, [url for url in old_images if url not in kept_images])
     with _compensate_uploads() as uploaded_images:
-        for file in files:
-            if file and allowed_file(file.filename):
-                uploaded_images.append(save_file(file))
+        _upload_images(valid_files, uploaded_images)
         post_to_edit.content = new_content
         post_to_edit.images = kept_images + uploaded_images
         post_to_edit.record_image_uploads(uploaded_images)

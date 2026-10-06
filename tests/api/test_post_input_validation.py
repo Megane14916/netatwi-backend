@@ -63,3 +63,31 @@ def test_create_weighted_boundary_is_accepted(client, contest_factory, user_fact
     login(user_factory("author"))
     fixed_time(now)
     assert client.post(f"/api/contests/{contest.id}/posts", data={"content": content}).status_code == 201
+
+
+def test_edit_required_contest_accepts_four_final_images(client, contest_factory, user_factory, login, fixed_time, monkeypatch):
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    contest = contest_factory(now, now + timedelta(hours=1), now + timedelta(hours=2), image_rule="required")
+    user = user_factory("author")
+    post = Post(contest_id=contest.id, user_id=user.id, content="Original")
+    post.images = ["old.png"]
+    db.session.add(post)
+    db.session.commit()
+    monkeypatch.setattr(app_module, "save_file", lambda file: file.filename)
+    login(user)
+    fixed_time(now)
+    response = client.put(f"/api/contests/{contest.id}/posts/{post.id}", data={
+        "content": "", "kept_images": '["old.png"]',
+        "images": [(BytesIO(b"image"), f"new{i}.png") for i in range(3)]})
+    assert response.status_code == 200 and len(response.get_json()["images"]) == 4
+
+
+def test_storage_returning_no_image_does_not_create_empty_post(client, contest_factory, user_factory, login, fixed_time, monkeypatch):
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    contest = contest_factory(now, now + timedelta(hours=1), now + timedelta(hours=2), image_rule="required")
+    monkeypatch.setattr(app_module, "save_file", lambda file: None)
+    login(user_factory("author"))
+    fixed_time(now)
+    response = client.post(f"/api/contests/{contest.id}/posts", data={"images": (BytesIO(b"image"), "image.png")})
+    assert response.status_code == 500
+    assert Post.query.count() == 0

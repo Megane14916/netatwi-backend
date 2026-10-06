@@ -56,20 +56,20 @@ def test_missing_contest_is_caught_as_generic_error(client, entry):
 
 
 @pytest.mark.parametrize("rule,filename,expected", [
-    ("required", None, 400), ("required", "bad.txt", 201),
+    ("required", None, 400), ("required", "bad.txt", 400),
     ("forbidden", "good.PNG", 201),
 ])
-def test_current_image_rule_and_extension_behavior(client, entry, fake_r2, rule, filename, expected):
+def test_image_rule_and_extension_behavior(client, entry, fake_r2, rule, filename, expected):
     contest, _, path = entry
     contest.image_rule = rule
     db.session.commit()
-    data = {"content": "x" * 281 + "\r\nend"}
+    data = {"content": "text\r\nend"}
     if filename:
         data["images"] = (BytesIO(b"image"), filename)
     response = client.post(path, data=data)
     assert response.status_code == expected
     if expected == 400:
-        assert response.get_json() == {"error": "画像を最低1枚添付してください"}
+        assert response.get_json() == {"error": "Unsupported image extension" if filename else "画像を最低1枚添付してください"}
     else:
         assert response.get_json()["content"] == data["content"]
         assert len(response.get_json()["images"]) == (filename == "good.PNG")
@@ -130,18 +130,18 @@ def test_update_validation_precedes_ownership_query(client, entry, content, erro
     assert response.get_json() == {"error": error}
 
 
-def test_update_normalizes_text_and_currently_allows_five_images(client, entry, fake_r2):
+def test_update_normalizes_text_and_allows_four_images(client, entry, fake_r2):
     contest, author, path = entry
     post = add_post(contest, author, ["https://r2.example/old.png"])
     response = client.put(f"{path}/{post.id}", data={
         "content": "a\r\nb\rc", "kept_images": "[]",
-        "images": [(BytesIO(b"x"), f"{i}.png") for i in range(5)],
+        "images": [(BytesIO(b"x"), f"{i}.png") for i in range(4)],
     })
     assert response.status_code == 200
     assert response.get_json()["content"] == "a\nb\nc"
     assert response.get_json()["myVotes"] is None
-    assert len(response.get_json()["images"]) == 5
-    assert fake_r2.upload_fileobj.call_count == 5
+    assert len(response.get_json()["images"]) == 4
+    assert fake_r2.upload_fileobj.call_count == 4
     fake_r2.delete_object.assert_called_once_with(Bucket="test-bucket", Key="old.png")
 
 
