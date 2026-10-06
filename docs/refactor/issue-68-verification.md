@@ -16,7 +16,8 @@ HTTP/DB/認証/期間/副作用と業務関数本体に変更はない。
 Python 3.11.16で関連61件と追加4件成功。新ケースはURL/methodの同等性、
 request.blueprint、旧endpointの不在、CORS/preflight/hook、審査員認証5/min、
 既定5000/hourの実際の連続リクエストを検証する。既存ケースをskipしていない。
-全体pytestとCIの結果は最終確認後追記する。
+全体pytestは849件成功（136.59秒）。URL map、起動/CLI、モデル契約、
+Alembic差分ゼロを含む。CIはPR #85で確認する。
 
 やってないこと: route再分類、URL prefix、HTTP応答、業務処理、DB schema、
 runtime bridge/状態分離(#69)、factory/WSGI切替(#70)。
