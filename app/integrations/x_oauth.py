@@ -65,9 +65,7 @@ def fetch_user_data(callback_url, session_state, code_verifier, code):
     if not access_token:
         raise ValueError("Token response did not contain access_token")
 
-    logger.info(
-        f"Access Token successfully fetched (starts with: {access_token[:10]}...)"
-    )
+    logger.info("X access token fetched successfully")
 
     # 2. ユーザー情報の取得 (★ライブラリのバグを回避するため、通常の requests で直接ヘッダーを指定)
     import requests
@@ -83,7 +81,7 @@ def fetch_user_data(callback_url, session_state, code_verifier, code):
 
     # もしエラーなら、Xから返ってきたエラー内容の詳細をログに出す
     if response.status_code != 200:
-        logger.error(f"X API Error Response Body: {response.text}")
+        logger.error("X user-info request failed; status=%s", response.status_code)
 
     response.raise_for_status()
     res_json = response.json()
