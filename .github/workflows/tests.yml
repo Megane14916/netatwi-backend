@@ -2,9 +2,9 @@ name: Backend tests
 
 on:
   push:
-    branches: [master]
+    branches: [master, fix/step-11-bugs]
   pull_request:
-    branches: [master]
+    branches: [master, fix/step-11-bugs]
 
 permissions:
   contents: read
