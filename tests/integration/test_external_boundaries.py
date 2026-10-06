@@ -1,3 +1,5 @@
+from app.integrations import cloud_tasks
+from app.integrations import images
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
@@ -25,7 +27,7 @@ def test_r2_upload_is_faked(app, fake_r2):
         stream=BytesIO(b"test image"), filename="photo.png", content_type="image/png"
     )
 
-    url = app_module.save_file(image)
+    url = images.save_file(image)
 
     assert url.startswith("https://r2.example/")
     fake_r2.upload_fileobj.assert_called_once()
@@ -35,7 +37,7 @@ def test_r2_upload_is_faked(app, fake_r2):
 def test_cloud_task_creation_is_faked(app, fake_cloud_tasks):
     scheduled_at = datetime.now(timezone.utc) + timedelta(hours=1)
 
-    app_module.schedule_contest_task(42, "post_start", scheduled_at)
+    cloud_tasks.schedule_contest_task(42, "post_start", scheduled_at)
 
     fake_cloud_tasks.create_task.assert_called_once()
     task = fake_cloud_tasks.create_task.call_args.kwargs["request"]["task"]

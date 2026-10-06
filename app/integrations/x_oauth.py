@@ -2,22 +2,14 @@
 
 import base64
 import hashlib
-import logging
-import os
 import secrets
 
+from flask import current_app
 from requests.auth import HTTPBasicAuth
 from requests_oauthlib import OAuth2Session
 
 
-logger = logging.getLogger("app")
 
-X_CLIENT_ID = os.environ.get(
-    "X_CONSUMER_KEY"
-)  # "X_CLIENT_ID" としても良いが、既存の環境変数を流用
-X_CLIENT_SECRET = os.environ.get(
-    "X_CONSUMER_SECRET"
-)  # "X_CLIENT_SECRET" としても良いが、既存の環境変数を流用
 AUTHORIZE_URL = "https://x.com/i/oauth2/authorize"
 TOKEN_URL = "https://api.x.com/2/oauth2/token"
 USER_INFO_URL = "https://api.x.com/2/users/me"
@@ -32,7 +24,7 @@ def build_authorization(callback_url):
     code_challenge = base64.urlsafe_b64encode(hashed).decode("utf-8").rstrip("=")
 
     # OAuth2Session の構築
-    twitter = OAuth2Session(X_CLIENT_ID, redirect_uri=callback_url, scope=X_SCOPES)
+    twitter = OAuth2Session(current_app.config["X_CONSUMER_KEY"], redirect_uri=callback_url, scope=X_SCOPES)
     authorization_url, state = twitter.authorization_url(
         AUTHORIZE_URL,
         code_challenge=code_challenge,
@@ -47,14 +39,14 @@ def build_authorization(callback_url):
 
 def fetch_user_data(callback_url, session_state, code_verifier, code):
     twitter = OAuth2Session(
-        X_CLIENT_ID, redirect_uri=callback_url, state=session_state
+        current_app.config["X_CONSUMER_KEY"], redirect_uri=callback_url, state=session_state
     )
-    auth = HTTPBasicAuth(X_CLIENT_ID, X_CLIENT_SECRET)
+    auth = HTTPBasicAuth(current_app.config["X_CONSUMER_KEY"], current_app.config["X_CONSUMER_SECRET"])
 
     # token の中身を明示的に取得する
     token_response = twitter.fetch_token(
         token_url=TOKEN_URL,
-        client_secret=X_CLIENT_SECRET,
+        client_secret=current_app.config["X_CONSUMER_SECRET"],
         code=code,
         auth=auth,
         code_verifier=code_verifier,
@@ -65,7 +57,7 @@ def fetch_user_data(callback_url, session_state, code_verifier, code):
     if not access_token:
         raise ValueError("Token response did not contain access_token")
 
-    logger.info("X access token fetched successfully")
+    current_app.logger.info("X access token fetched successfully")
 
     # 2. ユーザー情報の取得 (★ライブラリのバグを回避するため、通常の requests で直接ヘッダーを指定)
     import requests
@@ -81,7 +73,7 @@ def fetch_user_data(callback_url, session_state, code_verifier, code):
 
     # もしエラーなら、Xから返ってきたエラー内容の詳細をログに出す
     if response.status_code != 200:
-        logger.error("X user-info request failed; status=%s", response.status_code)
+        current_app.logger.error("X user-info request failed; status=%s", response.status_code)
 
     response.raise_for_status()
     res_json = response.json()

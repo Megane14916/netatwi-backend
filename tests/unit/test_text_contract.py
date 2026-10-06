@@ -2,7 +2,7 @@
 
 import pytest
 
-import app as app_module
+from app.services import text as text_service
 
 
 @pytest.mark.parametrize(
@@ -22,10 +22,10 @@ import app as app_module
     ],
 )
 def test_weighted_text_contract(text, expected):
-    assert app_module.calculate_weighted_length(text) == expected
+    assert text_service.calculate_weighted_length(text) == expected
 
 
 @pytest.mark.parametrize("text", [1, object(), ["text"]])
 def test_truthy_non_string_keeps_original_exception(text):
     with pytest.raises(AttributeError):
-        app_module.calculate_weighted_length(text)
+        text_service.calculate_weighted_length(text)

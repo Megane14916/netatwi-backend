@@ -29,7 +29,7 @@ def run_isolated(source, *, environment=None):
 @pytest.mark.parametrize("module", [
     "app.models", "app.models.user", "app.services.posts", "app.services.contests",
     "app.integrations.cloud_tasks", "app.integrations.images", "app.cli.user_stats",
-    "app.factory", "app.config", "app.extensions", "app.hooks", "app.runtime_dependencies",
+    "app.factory", "app.config", "app.extensions", "app.hooks", "app.services.text",
 ])
 def test_component_import_does_not_create_an_application_or_call_clients(module):
     environment = dict(os.environ)
@@ -107,7 +107,7 @@ def test_public_entry_repeated_imports_do_not_repeat_initialization():
             assert first.extensions["sqlalchemy"] is db
             other = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:"})
             assert other is not first
-        assert counts == {"apps": 2, "uploads": 1}
+        assert counts == {"apps": 2, "uploads": 2}
     ''')
 
 
@@ -116,6 +116,6 @@ def test_resource_and_instance_paths_stay_at_repository_root():
         assert Path(application.root_path) == ROOT
         assert Path(application.static_folder) == ROOT / "static"
         assert Path(application.instance_path) == ROOT / "instance"
-        assert app_module.UPLOAD_FOLDER == "static/uploads"
+        assert application.config["UPLOAD_FOLDER"] == "static/uploads"
         with application.open_resource("Dockerfile") as resource:
             assert resource.read() == (ROOT / "Dockerfile").read_bytes()
