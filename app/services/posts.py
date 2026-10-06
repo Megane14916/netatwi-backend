@@ -5,6 +5,11 @@ The route retains response serialization and the original exception boundary.
 """
 
 from datetime import datetime, timezone
+from contextlib import contextmanager
+import json
+
+from flask import current_app
+from itsdangerous import URLSafeSerializer
 
 from app.runtime_dependencies import (
     allowed_file,
@@ -14,6 +19,52 @@ from app.runtime_dependencies import (
     route_logger as logger,
 )
 from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, Vote, db
+
+
+def _cleanup_signer():
+    return URLSafeSerializer(current_app.config["SECRET_KEY"], salt="netatwi-image-cleanup")
+
+
+def cleanup_images(urls):
+    """Best-effort compensation; retain a signed proof for failed deletions."""
+    failures = []
+    for url in dict.fromkeys(urls):
+        try:
+            if _image_is_referenced(url):
+                raise ValueError("Image still referenced")
+            delete_file(url)
+        except Exception:
+            failures.append(url)
+            logger.error("IMAGE_CLEANUP_PENDING %s", json.dumps({"url": url, "token": _cleanup_signer().dumps(url)}))
+    return failures
+
+
+def retry_image_cleanup(token):
+    url = _cleanup_signer().loads(token)
+    if not isinstance(url, str) or not url:
+        raise ValueError("Invalid cleanup URL")
+    return not cleanup_images([url])
+
+
+def _image_is_referenced(url):
+    return any(isinstance(post.images, list) and url in post.images
+               for post in Post.query.filter(Post.image_urls.isnot(None)).all())
+
+
+@contextmanager
+def _compensate_uploads():
+    urls = []
+    try:
+        yield urls
+    except Exception as error:
+        failed_url = getattr(error, "uploaded_image_url", None)
+        if failed_url:
+            urls.append(failed_url)
+        try:
+            db.session.rollback()
+        finally:
+            cleanup_images(urls)
+        raise
 
 
 def _other_image_references(post):
@@ -95,22 +146,16 @@ def submit_post(id, user_id, content, files):
         return ({"error": "Already posted"}), 409
 
     # 画像アップロード処理
-    image_urls = []
-    for file in valid_files:
-        if allowed_file(file.filename):
-            url = save_file(file)
-            image_urls.append(url)
-
-    # Post作成 (images setter経由で保存)
-    new_post = Post(content=content, contest_id=id, user_id=user_id)
-    new_post.images = image_urls  # JSON化して保存される
-    new_post.record_image_uploads(image_urls)
-
-    # カウンタのアトミックなインクリメント（レースコンディション対策）
-    Contest.query.filter_by(id=id).update({"post_count": Contest.post_count + 1})
-
-    db.session.add(new_post)
-    db.session.commit()
+    with _compensate_uploads() as image_urls:
+        for file in valid_files:
+            if allowed_file(file.filename):
+                image_urls.append(save_file(file))
+        new_post = Post(content=content, contest_id=id, user_id=user_id)
+        new_post.images = image_urls
+        new_post.record_image_uploads(image_urls)
+        Contest.query.filter_by(id=id).update({"post_count": Contest.post_count + 1})
+        db.session.add(new_post)
+        db.session.commit()
 
     return new_post, 201
 
@@ -118,7 +163,7 @@ def submit_post(id, user_id, content, files):
 def update_post(contest_id, post_id, user_id, new_content, kept_images, files):
     post_to_edit = Post.query.filter_by(
         id=post_id, user_id=user_id, contest_id=contest_id
-    ).first()
+    ).with_for_update().first()
     if not post_to_edit:
         return ({"error": "Not found"}), 404
     c = Contest.query.get(contest_id)
@@ -139,40 +184,24 @@ def update_post(contest_id, post_id, user_id, new_content, kept_images, files):
             or (kept_images and set(kept_images) & _other_image_references(post_to_edit))):
         return ({"error": "Invalid kept images"}), 400
 
-    # 2. 新しい画像リスト (final_images) の構築
-    final_images = []
-    uploaded_images = []
-    # 維持する画像 (kept_images) を追加
-    if kept_images:
-        final_images.extend(kept_images)
-
-    # 新規アップロード画像を追加
-    if files:
+    deletions = owned_image_deletions(post_to_edit, [url for url in old_images if url not in kept_images])
+    with _compensate_uploads() as uploaded_images:
         for file in files:
             if file and allowed_file(file.filename):
-                url = save_file(file)
-                final_images.append(url)
-                uploaded_images.append(url)
-
-    # 3. 削除された画像を特定してストレージから削除
-    # old_images にはあるが、final_images にはないもの
-    for old_url in owned_image_deletions(post_to_edit, [url for url in old_images if url not in final_images]):
-        delete_file(old_url)
-
-    # 4. DB更新
-    post_to_edit.content = new_content
-    post_to_edit.images = final_images
-    post_to_edit.record_image_uploads(uploaded_images)
-    post_to_edit.updated_at = datetime.now(timezone.utc)
-
-    db.session.commit()
+                uploaded_images.append(save_file(file))
+        post_to_edit.content = new_content
+        post_to_edit.images = kept_images + uploaded_images
+        post_to_edit.record_image_uploads(uploaded_images)
+        post_to_edit.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+    cleanup_images(deletions)
     return post_to_edit, 200
 
 
 def delete_post(contest_id, post_id, user_id):
     post_to_delete = Post.query.filter_by(
         id=post_id, user_id=user_id, contest_id=contest_id
-    ).first()
+    ).with_for_update().first()
     if not post_to_delete:
         return ({"error": "Not found"}), 404
 
@@ -185,12 +214,7 @@ def delete_post(contest_id, post_id, user_id):
     ):
         return ({"error": "Outside period"}), 403
 
-    if post_to_delete.images:
-        for url in owned_image_deletions(post_to_delete, post_to_delete.images):
-            try:
-                delete_file(url)
-            except:
-                pass
+    deletions = owned_image_deletions(post_to_delete, post_to_delete.images)
 
     Vote.query.filter_by(post_id=post_id).delete()
     Comment.query.filter_by(post_id=post_id).delete()
@@ -206,4 +230,5 @@ def delete_post(contest_id, post_id, user_id):
     )
 
     db.session.commit()
+    cleanup_images(deletions)
     return ({"message": "Deleted successfully"}), 200

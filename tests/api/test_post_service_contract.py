@@ -146,7 +146,7 @@ def test_update_normalizes_text_and_currently_allows_five_images(client, entry, 
 
 
 @pytest.mark.parametrize("method", ["post", "put", "delete"])
-def test_commit_failure_keeps_existing_external_side_effects_and_rolls_back(
+def test_commit_failure_compensates_new_uploads_and_rolls_back(
     client, entry, monkeypatch, method
 ):
     contest, author, path = entry
@@ -172,8 +172,8 @@ def test_commit_failure_keeps_existing_external_side_effects_and_rolls_back(
     response = getattr(client, method)(path + (f"/{post_id}" if post else ""), data=data)
     assert response.status_code == 500
     assert response.get_json() == {"error": "Error"}
-    assert events == ({"post": ["upload"], "put": ["upload", "delete"], "delete": ["delete"]}[method]
-                      + ["commit", "rollback"])
+    assert events == (["commit", "rollback"] if method == "delete" else
+                      ["upload", "commit", "rollback", "delete", "rollback"])
     db.session.expire_all()
     assert db.session.get(Contest, contest_id).post_count == 0
     if post_id:
@@ -184,7 +184,7 @@ def test_commit_failure_keeps_existing_external_side_effects_and_rolls_back(
         assert Post.query.count() == 0
 
 
-def test_delete_images_then_related_rows_then_post_then_counter(client, entry, monkeypatch):
+def test_delete_commits_related_rows_and_counter_before_images(client, entry, monkeypatch):
     contest, author, path = entry
     post = add_post(contest, author, ["first.png", "second.png"])
     post_id, contest_id = post.id, contest.id
@@ -214,19 +214,20 @@ def test_delete_images_then_related_rows_then_post_then_counter(client, entry, m
         event.remove(db.engine, "before_cursor_execute", record_sql)
     assert response.status_code == 200
     assert response.get_json() == {"message": "Deleted successfully"}
-    assert events == ["first.png", "second.png", "vote", "comment", "notification",
-                      "bookmark", "contest_result", "post", "contest"]
+    assert events == ["vote", "comment", "notification", "bookmark", "contest_result",
+                      "post", "contest", "first.png", "second.png"]
     for model in (Vote, Comment, Notification, Bookmark, ContestResult, Post):
         assert model.query.count() == 0
     assert db.session.get(Contest, contest_id).post_count == 0
 
 
-def test_r2_upload_errors_propagate_but_delete_errors_are_swallowed(entry, fake_r2):
+def test_r2_upload_and_delete_errors_propagate_for_compensation(entry, fake_r2):
     from werkzeug.datastructures import FileStorage
 
     fake_r2.upload_fileobj.side_effect = RuntimeError("upload failed")
     fake_r2.delete_object.side_effect = RuntimeError("delete failed")
     with pytest.raises(RuntimeError, match="upload failed"):
         app_module.save_file(FileStorage(stream=BytesIO(b"image"), filename="image.png"))
-    assert app_module.delete_file("https://r2.example/old.png?query=1") is None
+    with pytest.raises(RuntimeError, match="delete failed"):
+        app_module.delete_file("https://r2.example/old.png?query=1")
     fake_r2.delete_object.assert_called_once_with(Bucket="test-bucket", Key="old.png")
