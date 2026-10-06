@@ -17,6 +17,37 @@ VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 FRONTEND = "http://localhost:3000"
 
 
+@pytest.mark.parametrize("flow", ["login", "login_failure", "success", "mismatch", "error", "http", "fetch"])
+def test_oauth_logs_never_contain_request_session_token_or_error_secrets(
+    client, fake_oauth, caplog, capsys, flow
+):
+    secret = "sensitive-value-do-not-log"
+    with client.session_transaction() as session:
+        session.update(oauth_state=secret + "-state", code_verifier=secret + "-verifier")
+        session[secret + "-key"] = secret + "-value"
+    client.set_cookie("private", secret + "-cookie")
+    token = secret + "-token"
+    fake_oauth.oauth.return_value.fetch_token.return_value = {"access_token": token}
+    if flow == "login_failure":
+        fake_oauth.oauth.return_value.authorization_url.side_effect = RuntimeError(secret)
+    elif flow == "http":
+        fake_oauth.response.status_code = 403
+        fake_oauth.response.text = secret + "-body"
+        fake_oauth.response.raise_for_status.side_effect = requests.HTTPError(secret)
+    elif flow == "fetch":
+        fake_oauth.oauth.return_value.fetch_token.side_effect = RuntimeError(secret)
+    headers = {"Authorization": "Bearer " + secret, "X-Forwarded-Proto": "https"}
+    path = "/api/login/twitter" if flow.startswith("login") else "/api/callback/twitter"
+    state = "mismatch-" + secret if flow == "mismatch" else secret + "-state"
+    with caplog.at_level("INFO", logger="app"):
+        client.get(path, headers=headers, query_string={"state": state, "code": secret + "-code",
+                                                       **({"error": secret + "-error"} if flow == "error" else {})})
+    output = capsys.readouterr()
+    assert secret not in caplog.text + output.out + output.err
+    assert token[:10] not in caplog.text
+    assert "OAuth request" in caplog.text
+
+
 @pytest.fixture
 def fake_oauth(monkeypatch):
     oauth = Mock()
