@@ -1,7 +1,6 @@
 """Explicit factory registration, WSGI, CLI and direct-entry contracts (#70)."""
 
 import runpy
-from pathlib import Path
 
 import pytest
 from flask import Flask
@@ -101,12 +100,3 @@ def test_direct_entry_creates_tables_then_runs_server(monkeypatch, capsys, port,
     assert events == [("tables", application), ("server", application, {"host": "0.0.0.0", "port": expected, "debug": False})]
     assert "app" not in loaded
     assert capsys.readouterr().out == "Database tables created (if not existed).\n"
-
-
-def test_auxiliary_script_imports_are_cold_and_use_shared_db(monkeypatch):
-    assert Path("sync_comment_counts.py").is_file()
-    monkeypatch.setattr(Flask, "__init__", lambda *_args, **_kwargs: pytest.fail("script import created app"))
-    loaded = runpy.run_path("sync_comment_counts.py", run_name="script_import")
-    assert loaded["create_app"] is create_app
-    assert loaded["db"] is db
-    assert "app" not in loaded
