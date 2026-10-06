@@ -64,3 +64,13 @@ def test_new_uploads_keep_their_ownership_through_edit_and_delete(client, images
     assert client.put(path, json={"content": "Kept", "kept_images": new}).status_code == 200
     assert client.delete(path).status_code == 200
     delete.assert_called_once_with(new[0])
+
+
+def test_malformed_form_kept_images_rejects_uploads(client, images):
+    post, _, save, delete, path = images
+    response = client.put(path, data={"content": "Edited", "kept_images": "invalid JSON",
+                                     "images": (BytesIO(b"image"), "new.png")})
+    assert response.status_code == 400
+    save.assert_not_called()
+    delete.assert_not_called()
+    assert post.content == "Entry"
