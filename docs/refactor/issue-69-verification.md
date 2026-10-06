@@ -38,7 +38,9 @@ DBを各appで初期化してcache分離を検証する契約へ置換した。
 
 [比較script](verify_issue_69_structure.py)で、依存名・cache状態参照の許可した置換後に
 業務関数のASTを照合する。HTTP/DB/計算式/副作用/commit/rollbackの順序は変更しない。
-全体pytest/CI結果は最終確認後に追記する。skipで成功させない。
+Python 3.11.16で全体pytest 844件成功（123.38秒）。URL/method、起動/CLI、
+全10モデルとAlembic差分ゼロを含む。#68の849件から互換15件を6件へ置換し、
+回帰4件を追加した結果844件となった。skipはない。CIはPR #86で確認する。
 #68取り込み後11件・開発ブランチCIは成功した。
 
 やってないこと: DB schema、業務仕様、factoryの通常公開とWSGIの最終切替(#70)、
