@@ -14,6 +14,37 @@ from app.models import Contest, Post, Vote, db
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
 
 
+@pytest.mark.parametrize("target", ["foreign", "missing", "own", "invalid_id"])
+@pytest.mark.parametrize("kind", ["vote", "award", "mixed"])
+def test_invalid_targets_leave_existing_votes_award_and_counters_unchanged(
+    client, voting, contest_factory, user_factory, login, target, kind
+):
+    contest, voter, post, own, path = voting
+    foreign = contest_factory(NOW, NOW, NOW)
+    foreign_post = Post(contest_id=foreign.id, user_id=user_factory("foreign").id, content="Other")
+    db.session.add(foreign_post)
+    db.session.commit()
+    vote = seed_vote(contest, voter, post, judge=True)
+    vote.is_judge_award = True
+    vote.judge_comment = "existing award"
+    db.session.commit()
+    vote_id = vote.id
+    login(voter, judge_contests=[contest.id])
+    pid = {"foreign": foreign_post.id, "missing": 99999, "own": own.id, "invalid_id": "bad"}[target]
+    payload = {"votes": {str(pid): 1} if kind == "vote" else {}}
+    if kind != "vote":
+        payload["judgeAward"] = {"postId": pid, "comment": "new"}
+    if kind == "mixed":
+        payload["votes"] = {str(post.id): 3}
+    response = client.post(path, json=payload)
+    assert response.status_code == 400
+    saved = Vote.query.one()
+    assert (saved.id, saved.post_id, saved.count, saved.is_judge_award, saved.judge_comment) == (
+        vote_id, post.id, 1, True, "existing award")
+    assert counts(contest) == (1, 1)
+    assert counts(foreign) == (0, 0)
+
+
 @pytest.fixture
 def voting(client, contest_factory, user_factory, login, fixed_time):
     contest = contest_factory(NOW - timedelta(hours=1), NOW, NOW + timedelta(hours=1),
