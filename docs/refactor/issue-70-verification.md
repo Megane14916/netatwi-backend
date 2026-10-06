@@ -46,7 +46,11 @@ package自体を追加し、全体fixtureもdefault appを生成せずfactoryを
 HTTP/業務のテストと期待値は保持。テストのdb参照とhandler参照だけを移す。
 
 [比較script](verify_issue_70_structure.py)はfactory/公開/入口を除くアプリ全体の
-import以外のASTが一致することを確認する。全体pytest/CI結果は最終確認後追記する。
+import以外のASTが一致することを53 moduleで確認した。Python 3.11.16で関連44件、
+全体847件成功（132.67秒）。全10モデル・Alembic差分ゼロ・URL mapも成功。
+追加はcold factory再現2件とpackage自体のcold import1件。既存caseは新入口へ置換。
+管理外scriptを含む7本の構文・canonical入口を照合し、パッチ逆適用のcheckも成功。
+CIは本Issueの個別PRで確認する。
 #69取り込み後40件と開発ブランチCIは成功した。
 
 やってないこと: 業務処理/HTTP URL/method/応答/DB schema/migration、devへの反映、

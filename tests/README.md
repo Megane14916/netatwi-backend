@@ -12,6 +12,26 @@ macOS／Linux では `python3.11 -m venv .venv` を実行し、以後は `.venv/
 
 GitHub Actions も Python 3.11 で同じ `python -m pytest -q` を実行する。
 
+## 順12の起動入口と現在の検証
+
+packageのimportはappを生成しない。`from app import create_app`でfactoryを取得し、
+テスト・CLI・scriptは明示的にappを作る。dbは`app.extensions.db`、モデルは
+`app.models`、結果と文字数は担当serviceを使用する。
+
+```powershell
+python -m flask --app app:create_app routes
+python -m flask --app app:create_app --help
+python app.py
+```
+
+WSGI/Gunicornは`wsgi:app`。Dockerfileもこの入口を使う。直接起動の`python app.py`は
+従来どおりcreate_allして開発serverを起動する。factoryとWSGIはcreate_allを行わない。
+本番DBを更新する補助scriptやCLIの検証はfixture/fakeと一時DBで行う。
+
+順12の最終ローカル検証はPython 3.11.16で847件成功。下表の645件は#53時点の記録。
+旧exportだけを要求するケースは新契約へ置換し、業務・HTTP・DB・外部副作用のケースは
+保持した。[順12検証記録](../docs/refactor/step-12-verification.md)に変更と入口切替を記録する。
+
 ## 配置と収集
 
 リポジトリ直下から実行する。pytestは下記3ディレクトリを再帰的に収集する。

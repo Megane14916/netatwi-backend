@@ -8,8 +8,13 @@ BASE = "2c57f8008f38d7e38671b5ca833f45e823f49447"
 
 
 def without_imports(source):
-    tree = ast.parse(source)
-    tree.body = [n for n in tree.body if not isinstance(n, (ast.Import, ast.ImportFrom))]
+    class RemoveImports(ast.NodeTransformer):
+        def visit_Import(self, node):
+            return None
+
+        def visit_ImportFrom(self, node):
+            return None
+    tree = RemoveImports().visit(ast.parse(source))
     return ast.dump(tree, include_attributes=False)
 
 
