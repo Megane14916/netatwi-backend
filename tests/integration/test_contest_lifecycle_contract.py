@@ -212,9 +212,9 @@ def test_delete_original_targets_and_order_leaves_related_data_and_child(client,
         event.remove(db.engine, "before_cursor_execute", record)
     assert response.status_code == 200
     assert response.get_json() == {"message": "大会が正常に削除されました。"}
-    assert deletes == ["vote", "post", "contest_result", "contest"]
+    assert deletes == ["vote", "comment", "notification", "bookmark", "contest_result", "post", "contest"]
     assert Vote.query.count() == Post.query.count() == ContestResult.query.count() == 0
-    assert Bookmark.query.count() == Comment.query.count() == 1
+    assert Bookmark.query.count() == Comment.query.count() == 0
     assert db.session.get(Contest, child_id).parent_contest_id is None
     delete_image.assert_not_called()
 
