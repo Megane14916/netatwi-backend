@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.models import Contest, ContestResult, Notification, Post, db
+from app.extensions import db
+from app.models import Contest, ContestResult, Notification, Post
 
 
 @pytest.mark.parametrize("entry", ["task", "cli"])

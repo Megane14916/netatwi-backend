@@ -5,6 +5,7 @@ from importlib import import_module
 from pathlib import Path
 
 import app.models as models
+from app.extensions import db
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from sqlalchemy import create_engine
@@ -42,7 +43,7 @@ MODEL_MODULES = {
 def schema_ddl():
     dialect = sqlite.dialect()
     statements = []
-    for table in sorted(models.db.metadata.tables.values(), key=lambda table: table.name):
+    for table in sorted(db.metadata.tables.values(), key=lambda table: table.name):
         create_table = str(CreateTable(table).compile(dialect=dialect)).strip()
         statements.append(
             "\n".join(line.rstrip() for line in create_table.splitlines()) + ";"
@@ -66,7 +67,7 @@ def relationship_contract():
             for relation in sorted(mapper.relationships, key=lambda relation: relation.key)
         }
         for mapper in sorted(
-            models.db.Model.registry.mappers, key=lambda mapper: mapper.class_.__name__
+            db.Model.registry.mappers, key=lambda mapper: mapper.class_.__name__
         )
     }
 
@@ -74,10 +75,10 @@ def relationship_contract():
 def test_all_models_are_exported_and_registered():
     registered = {
         mapper.class_.__name__: mapper.class_
-        for mapper in models.db.Model.registry.mappers
+        for mapper in db.Model.registry.mappers
     }
     assert set(registered) == MODEL_NAMES
-    assert set(models.db.metadata.tables) == {
+    assert set(db.metadata.tables) == {
         "user",
         "contest",
         "post",
@@ -97,7 +98,7 @@ def test_each_model_module_uses_the_shared_db():
     for name, module_name in MODEL_MODULES.items():
         module = import_module(f"app.models.{module_name}")
         assert getattr(module, name) is getattr(models, name)
-        assert module.db is models.db
+        assert module.db is db
 
 
 def test_ddl_matches_pre_refactor_snapshot():
@@ -120,7 +121,7 @@ def test_alembic_has_zero_differences_against_pre_refactor_schema():
             if statement.strip():
                 connection.exec_driver_sql(statement.strip())
         differences = compare_metadata(
-            MigrationContext.configure(connection), models.db.metadata
+            MigrationContext.configure(connection), db.metadata
         )
 
     assert differences == []

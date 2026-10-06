@@ -2,13 +2,13 @@
 
 from flask import jsonify, request, session
 
-from app.models import db
+from app.extensions import db
 from app.services import voting as voting_service
-from app.runtime_dependencies import route_logger as logger
-from .legacy import LegacyEndpointBlueprint
+from flask import current_app
+from flask import Blueprint
 
 
-bp = LegacyEndpointBlueprint("voting", __name__)
+bp = Blueprint("voting", __name__)
 
 
 @bp.route("/api/contests/<int:id>/vote", methods=["POST"])
@@ -16,7 +16,7 @@ def submit_votes(id):
     import time
 
     start_time = time.time()
-    logger.info(f"==> [submit_votes] START for contest {id}")
+    current_app.logger.info(f"==> [submit_votes] START for contest {id}")
     if "user_id" not in session:
         return jsonify({"error": "Login required"}), 401
 
@@ -42,7 +42,7 @@ def submit_votes(id):
         return jsonify(result), status
     except Exception as e:
         db.session.rollback()
-        logger.error(
+        current_app.logger.error(
             f"==> [submit_votes] ERROR in {time.time() - start_time:.4f}s: {e}"
         )
         print(f"Error: {e}")

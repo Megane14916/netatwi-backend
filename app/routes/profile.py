@@ -5,10 +5,10 @@ import traceback
 from flask import jsonify, session
 
 from app.services import profile as profile_service
-from .legacy import LegacyEndpointBlueprint
+from flask import Blueprint
 
 
-bp = LegacyEndpointBlueprint("profile", __name__)
+bp = Blueprint("profile", __name__)
 
 
 @bp.route("/api/profile/<string:screen_name>")

@@ -1,12 +1,15 @@
 """URLs supplied by a client are not proof of image ownership (Refs #71)."""
 
+from app.integrations import images as image_storage
+
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from unittest.mock import Mock
 
 import pytest
 import app as app_module
-from app.models import Post, db
+from app.extensions import db
+from app.models import Post
 
 
 @pytest.fixture
@@ -22,8 +25,8 @@ def images(client, user_factory, contest_factory, login, fixed_time, monkeypatch
     login(owner)
     fixed_time(now)
     save, delete = Mock(return_value="https://r2.example/new.png"), Mock()
-    monkeypatch.setattr(app_module, "save_file", save)
-    monkeypatch.setattr(app_module, "delete_file", delete)
+    monkeypatch.setattr(image_storage, "save_file", save)
+    monkeypatch.setattr(image_storage, "delete_file", delete)
     return posts[0], posts[1], save, delete, f"/api/contests/{contest.id}/posts/{posts[0].id}"
 
 

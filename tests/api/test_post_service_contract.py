@@ -1,5 +1,7 @@
 """Characterize CRUD validation and image/DB ordering before service extraction."""
 
+from app.integrations import images
+
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
@@ -7,7 +9,7 @@ import pytest
 from sqlalchemy import event
 
 import app as app_module
-from app import db
+from app.extensions import db
 from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, Vote
 
 
@@ -154,8 +156,8 @@ def test_commit_failure_compensates_new_uploads_and_rolls_back(
     post_id = post.id if post else None
     contest_id = contest.id
     events = []
-    monkeypatch.setattr(app_module, "save_file", lambda file: events.append("upload") or "new.png")
-    monkeypatch.setattr(app_module, "delete_file", lambda url: events.append("delete"))
+    monkeypatch.setattr(images, "save_file", lambda file: events.append("upload") or "new.png")
+    monkeypatch.setattr(images, "delete_file", lambda url: events.append("delete"))
     original_rollback = db.session.rollback
 
     def failed_commit():
@@ -206,7 +208,7 @@ def test_delete_commits_related_rows_and_counter_before_images(client, entry, mo
         if statement.startswith(("DELETE", "UPDATE")):
             events.append(statement.split()[2 if statement.startswith("DELETE") else 1])
 
-    monkeypatch.setattr(app_module, "delete_file", delete_image)
+    monkeypatch.setattr(images, "delete_file", delete_image)
     event.listen(db.engine, "before_cursor_execute", record_sql)
     try:
         response = client.delete(f"{path}/{post_id}")
@@ -227,7 +229,7 @@ def test_r2_upload_and_delete_errors_propagate_for_compensation(entry, fake_r2):
     fake_r2.upload_fileobj.side_effect = RuntimeError("upload failed")
     fake_r2.delete_object.side_effect = RuntimeError("delete failed")
     with pytest.raises(RuntimeError, match="upload failed"):
-        app_module.save_file(FileStorage(stream=BytesIO(b"image"), filename="image.png"))
+        images.save_file(FileStorage(stream=BytesIO(b"image"), filename="image.png"))
     with pytest.raises(RuntimeError, match="delete failed"):
-        app_module.delete_file("https://r2.example/old.png?query=1")
+        images.delete_file("https://r2.example/old.png?query=1")
     fake_r2.delete_object.assert_called_once_with(Bucket="test-bucket", Key="old.png")

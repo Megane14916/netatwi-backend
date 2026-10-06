@@ -1,19 +1,18 @@
 """Authentication decisions, user synchronization and session updates."""
 
-import logging
 
 from flask import current_app, session
 
 from app.integrations import x_oauth
-from app.models import Contest, User, db
+from app.extensions import db
+from app.models import Contest, User
 
 
-logger = logging.getLogger("app")
 
 
 def start_twitter_login():
     callback_url = f"{current_app.config['FRONTEND_URL']}/api/callback/twitter"
-    logger.info("Starting X authorization")
+    current_app.logger.info("Starting X authorization")
 
     authorization_url, state, code_verifier = x_oauth.build_authorization(callback_url)
 
@@ -25,14 +24,14 @@ def start_twitter_login():
         session["judge_for_contest_ids"] = judge_ids
     session.modified = True
 
-    logger.info("OAuth verification data saved to session")
+    current_app.logger.info("OAuth verification data saved to session")
 
     return authorization_url
 
 
 def begin_twitter_callback():
-    logger.info(f"=== CALLBACK START ===")
-    logger.info("OAuth verification data present: state=%s; verifier=%s",
+    current_app.logger.info(f"=== CALLBACK START ===")
+    current_app.logger.info("OAuth verification data present: state=%s; verifier=%s",
                 bool(session.get("oauth_state")), bool(session.get("code_verifier")))
 
     # セッションから検証用データを取得・削除
@@ -44,17 +43,17 @@ def begin_twitter_callback():
 
 def validate_twitter_callback(session_state, code_verifier, url_state, code, error):
     if error:
-        logger.error("X login rejected by authorization provider")
+        current_app.logger.error("X login rejected by authorization provider")
         return error
 
     if not all([session_state, code_verifier, code]):
-        logger.error("Missing state, code_verifier, or code in callback.")
+        current_app.logger.error("Missing state, code_verifier, or code in callback.")
         reason = "session_token_missing" if not session_state else "verifier_missing"
         return reason
 
     # state の一致検証（CSRF対策）
     if url_state != session_state:
-        logger.error("OAuth state mismatch")
+        current_app.logger.error("OAuth state mismatch")
         return "state_mismatch"
 
 
@@ -103,7 +102,7 @@ def sync_twitter_user(user_data):
     session["name"] = user.name
     session["profile_image_url"] = user.profile_image_url
 
-    logger.info("X login successful")
+    current_app.logger.info("X login successful")
 
 
 def authenticate_judge(id, password):

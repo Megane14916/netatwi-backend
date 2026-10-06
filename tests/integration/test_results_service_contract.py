@@ -1,11 +1,14 @@
 """Freeze result generation boundaries and read-only result presentation."""
 
+from app.services import results as results_service
+
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 import app as app_module
-from app.models import ContestResult, Notification, Post, Vote, db
+from app.extensions import db
+from app.models import ContestResult, Notification, Post, Vote
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
@@ -58,11 +61,11 @@ def test_missing_contest_and_partial_saved_results_skip_all_writes(finished, mon
                                 score=12.5, rank=7, is_advanced=True, is_judge_award=True))
     db.session.commit()
     events = observe_writes(monkeypatch)
-    assert app_module.generate_contest_results(999) is None
-    assert app_module.generate_contest_results(contest.id) is None
+    assert results_service.generate_contest_results(999) is None
+    assert results_service.generate_contest_results(contest.id) is None
     assert events == []
-    assert app_module.get_cached_contest_results(999) == {}
-    assert app_module.get_cached_contest_results(contest.id) == {
+    assert results_service.get_cached_contest_results(999) == {}
+    assert results_service.get_cached_contest_results(contest.id) == {
         post.id: {"post_id": post.id, "rank": 7, "score": 12.5,
                   "is_advanced": True, "is_judge_award": True},
     }
@@ -72,8 +75,8 @@ def test_empty_generation_still_bulk_saves_and_commits_on_every_run(contest_fact
     contest = contest_factory(NOW, NOW, NOW)
     events = observe_writes(monkeypatch)
     for _ in range(2):
-        assert app_module.generate_contest_results(contest.id) is None
-        assert app_module.get_cached_contest_results(contest.id) == {}
+        assert results_service.generate_contest_results(contest.id) is None
+        assert results_service.get_cached_contest_results(contest.id) == {}
     assert events == [("results", 0), "commit", ("results", 0), "commit"]
 
 
@@ -84,7 +87,7 @@ def test_generation_persistence_failure_rolls_back_and_propagates(
     contest, _, _ = finished
     events = observe_writes(monkeypatch, failure)
     with pytest.raises(RuntimeError, match=f"{failure} failed"):
-        app_module.generate_contest_results(contest.id)
+        results_service.generate_contest_results(contest.id)
     assert events == [("results", 1)] + (["commit"] if failure == "commit" else []) + ["rollback"]
     assert capsys.readouterr().out == ""
     assert ContestResult.query.count() == 0
@@ -125,7 +128,7 @@ def test_rounded_scores_define_tied_rank_and_advancement_cutoff(finished, user_f
         Vote(contest_id=contest.id, post_id=second.id, user_id=judge.id, count=1.004, is_judge_vote=True),
     ])
     db.session.commit()
-    app_module.generate_contest_results(contest.id)
+    results_service.generate_contest_results(contest.id)
     rows = ContestResult.query.order_by(ContestResult.id).all()
     assert [(r.post_id, r.score, r.rank, r.is_advanced) for r in rows] == [
         (second.id, 1.0, 1, True), (first.id, 1.0, 1, True), (third.id, 0.0, 3, False),
@@ -137,8 +140,8 @@ def test_advancement_uses_integer_cutoff(finished, numerator, denominator, advan
     contest, _, post = finished
     contest.advancement_numerator, contest.advancement_denominator = numerator, denominator
     db.session.commit()
-    app_module.generate_contest_results(contest.id)
-    assert app_module.get_cached_contest_results(contest.id)[post.id]["is_advanced"] is advanced
+    results_service.generate_contest_results(contest.id)
+    assert results_service.get_cached_contest_results(contest.id)[post.id]["is_advanced"] is advanced
 
 
 @pytest.mark.parametrize("offset,status", [(timedelta(microseconds=-1), 403), (timedelta(0), 200)])

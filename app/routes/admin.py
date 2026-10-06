@@ -5,17 +5,18 @@ import traceback
 
 from flask import current_app, jsonify, request, session
 
-from app.models import db
+from app.extensions import db
+from app.integrations import cloud_tasks
 from app.services import contest_lifecycle
 from app.services import contests as contest_service
-from .legacy import LegacyEndpointBlueprint
+from flask import Blueprint
 
 
-bp = LegacyEndpointBlueprint("admin", __name__)
+bp = Blueprint("admin", __name__)
 
 
 def schedule_contest_task(*args):
-    return current_app.extensions["schedule_contest_task"](*args)
+    return cloud_tasks.schedule_contest_task(*args)
 
 
 @bp.route("/api/admin/contests", methods=["POST"])

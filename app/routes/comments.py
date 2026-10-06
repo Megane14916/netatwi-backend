@@ -3,10 +3,10 @@
 from flask import jsonify, request, session
 
 from app.services import comments as comments_service
-from .legacy import LegacyEndpointBlueprint
+from flask import Blueprint
 
 
-bp = LegacyEndpointBlueprint("comments", __name__)
+bp = Blueprint("comments", __name__)
 
 
 @bp.route("/api/posts/<int:post_id>/comments", methods=["GET"])

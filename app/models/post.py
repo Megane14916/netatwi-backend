@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 import json
-from .base import db
+from app.extensions import db
 
 
 class Post(db.Model):

@@ -1,5 +1,7 @@
 """Step 11 posting validation regressions (first part of #21)."""
 
+from app.integrations import images
+
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 import json
@@ -7,7 +9,8 @@ from unittest.mock import Mock
 
 import pytest
 import app as app_module
-from app.models import Post, db
+from app.extensions import db
+from app.models import Post
 
 
 @pytest.mark.parametrize("method,content,kept,new,rule", [
@@ -38,8 +41,8 @@ def test_invalid_final_post_has_no_storage_or_db_effects(
         db.session.commit()
         path += f"/{post.id}"
     upload, delete = Mock(side_effect=lambda file: file.filename), Mock()
-    monkeypatch.setattr(app_module, "save_file", upload)
-    monkeypatch.setattr(app_module, "delete_file", delete)
+    monkeypatch.setattr(images, "save_file", upload)
+    monkeypatch.setattr(images, "delete_file", delete)
     login(user)
     fixed_time(now)
     data = {"content": content, "kept_images": json.dumps(post.images[:kept] if post else [])}
@@ -73,7 +76,7 @@ def test_edit_required_contest_accepts_four_final_images(client, contest_factory
     post.images = ["old.png"]
     db.session.add(post)
     db.session.commit()
-    monkeypatch.setattr(app_module, "save_file", lambda file: file.filename)
+    monkeypatch.setattr(images, "save_file", lambda file: file.filename)
     login(user)
     fixed_time(now)
     response = client.put(f"/api/contests/{contest.id}/posts/{post.id}", data={
@@ -85,7 +88,7 @@ def test_edit_required_contest_accepts_four_final_images(client, contest_factory
 def test_storage_returning_no_image_does_not_create_empty_post(client, contest_factory, user_factory, login, fixed_time, monkeypatch):
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     contest = contest_factory(now, now + timedelta(hours=1), now + timedelta(hours=2), image_rule="required")
-    monkeypatch.setattr(app_module, "save_file", lambda file: None)
+    monkeypatch.setattr(images, "save_file", lambda file: None)
     login(user_factory("author"))
     fixed_time(now)
     response = client.post(f"/api/contests/{contest.id}/posts", data={"images": (BytesIO(b"image"), "image.png")})
@@ -109,8 +112,8 @@ def test_edit_without_text_accepts_images_and_rejects_empty_post(
     db.session.add(post)
     db.session.commit()
     upload, delete = Mock(), Mock()
-    monkeypatch.setattr(app_module, "save_file", upload)
-    monkeypatch.setattr(app_module, "delete_file", delete)
+    monkeypatch.setattr(images, "save_file", upload)
+    monkeypatch.setattr(images, "delete_file", delete)
     login(user)
     fixed_time(now)
     kept = post.images if keep_image else []
@@ -146,8 +149,8 @@ def test_edit_without_text_accepts_new_image(
     db.session.add(post)
     db.session.commit()
     upload, delete = Mock(return_value="new.png"), Mock()
-    monkeypatch.setattr(app_module, "save_file", upload)
-    monkeypatch.setattr(app_module, "delete_file", delete)
+    monkeypatch.setattr(images, "save_file", upload)
+    monkeypatch.setattr(images, "delete_file", delete)
     login(user)
     fixed_time(now)
 

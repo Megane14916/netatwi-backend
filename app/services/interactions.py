@@ -2,7 +2,8 @@
 
 from datetime import datetime, timezone
 
-from app.models import Bookmark, Post, Vote, db
+from app.extensions import db
+from app.models import Bookmark, Post, Vote
 from app.services import notifications as notifications_service
 
 

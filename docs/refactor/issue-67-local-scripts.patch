@@ -1,0 +1,23 @@
+--- a/generate_dummy_data.py
++++ b/generate_dummy_data.py
+@@ -4 +4,2 @@
+-from models import User, Contest, Post, Vote, Comment
++from app.extensions import db
++from app.models import User, Contest, Post, Vote, Comment
+--- a/generate_dummy_gp_result.py
++++ b/generate_dummy_gp_result.py
+@@ -4 +4,2 @@
+-from models import User, Contest, Post, Vote, Comment, Notification, ContestResult
++from app.extensions import db
++from app.models import User, Contest, Post, Vote, Comment, Notification, ContestResult
+--- a/scripts/sync_comment_count.py
++++ b/scripts/sync_comment_count.py
+@@ -8 +8,2 @@
+-from models import Post, Comment
++from app.extensions import db
++from app.models import Post, Comment
+--- a/scripts/recalculate_contest_stats.py
++++ b/scripts/recalculate_contest_stats.py
+@@ -10 +10 @@
+-from models import Contest, Post, Vote
++from app.models import Contest, Post, Vote

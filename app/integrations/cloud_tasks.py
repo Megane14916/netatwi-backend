@@ -1,6 +1,5 @@
 """Cloud Tasks request construction and scheduled task creation."""
 
-import os
 from datetime import datetime, timedelta, timezone
 
 from flask import current_app, request
@@ -10,9 +9,6 @@ from google.oauth2 import id_token
 
 from google.cloud import tasks_v2
 from google.protobuf import timestamp_pb2
-
-
-_cloud_tasks_client = None
 
 
 def authenticate_task_request():
@@ -36,13 +32,12 @@ def authenticate_task_request():
 
 
 def schedule_contest_task(contest_id, event_type, schedule_time):
-    global _cloud_tasks_client
-    project = os.environ.get("GCP_PROJECT_ID")
-    location = os.environ.get("GCP_LOCATION")
-    queue = os.environ.get("GCP_QUEUE_NAME")
-    handler_url = os.environ.get("TASK_HANDLER_URL") or os.environ.get("GCR_URL")
-    audience = os.environ.get("TASKS_OIDC_AUDIENCE")
-    service_account = os.environ.get("TASKS_SERVICE_ACCOUNT_EMAIL")
+    project = current_app.config.get("GCP_PROJECT_ID")
+    location = current_app.config.get("GCP_LOCATION")
+    queue = current_app.config.get("GCP_QUEUE_NAME")
+    handler_url = current_app.config.get("TASK_HANDLER_URL") or current_app.config.get("GCR_URL")
+    audience = current_app.config.get("TASKS_OIDC_AUDIENCE")
+    service_account = current_app.config.get("TASKS_SERVICE_ACCOUNT_EMAIL")
 
     if not all([project, location, queue, handler_url]):
         print(f"Skipping task scheduling for {event_type} - GCP configuration missing.")
@@ -51,9 +46,9 @@ def schedule_contest_task(contest_id, event_type, schedule_time):
     if not audience or not service_account:
         raise ValueError("Cloud Tasks OIDC audience and service account are required")
 
-    if _cloud_tasks_client is None:
-        _cloud_tasks_client = tasks_v2.CloudTasksClient()
-    client = _cloud_tasks_client
+    if "cloud_tasks_client" not in current_app.extensions:
+        current_app.extensions["cloud_tasks_client"] = tasks_v2.CloudTasksClient()
+    client = current_app.extensions["cloud_tasks_client"]
     parent = client.queue_path(project, location, queue)
 
     url = f"{handler_url}/api/tasks/contest/{contest_id}/{event_type}"

@@ -5,7 +5,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import event
 
-from app.models import Comment, Notification, Post, db
+from app.extensions import db
+from app.models import Comment, Notification, Post
 from app.services import notifications
 
 

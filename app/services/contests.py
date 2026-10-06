@@ -1,28 +1,27 @@
-"""Public and management contest queries with the original shared cache."""
+"""Public and management contest queries with an application-local cache."""
 
-import logging
 from datetime import datetime, timedelta, timezone
 
+from flask import current_app
 from app.models import Contest, ContestResult
 
 
-logger = logging.getLogger("app")
 JST = timezone(timedelta(hours=9), "JST")
 
 # Simple cache for get_contests
-_contests_cache = None
-_contests_cache_time = 0
+def contest_cache():
+    return current_app.extensions.setdefault("contests_cache", {"payload": None, "time": 0})
 
 
 def get_cached_contests(time):
-    global _contests_cache, _contests_cache_time
-    if _contests_cache and time.time() - _contests_cache_time < 5:
-        return True, _contests_cache
+    cache = contest_cache()
+    if cache["payload"] and time.time() - cache["time"] < 5:
+        return True, cache["payload"]
     return False, None
 
 
 def get_contests(time):
-    global _contests_cache, _contests_cache_time
+    cache = contest_cache()
     contests = Contest.query.order_by(Contest.start_time.desc()).all()
     now = datetime.now(timezone.utc)
     ongoing, voting, upcoming, closed_list, closed_data = [], [], [], [], []
@@ -108,15 +107,15 @@ def get_contests(time):
         "latestResult": latest_result,
     }
     # Response オブジェカトではなく dict で保持する（ミリセッンスレベルでの共有による不具合を回避）
-    _contests_cache = payload
-    _contests_cache_time = time.time()
+    cache["payload"] = payload
+    cache["time"] = time.time()
     return (payload)
 
 
 def get_contest_for_details(id, start_time, time):
     contest = Contest.query.get_or_404(id)
     t1 = time.time()
-    logger.info(f"[get_contest_details] get_or_404: {t1 - start_time:.4f}s")
+    current_app.logger.info(f"[get_contest_details] get_or_404: {t1 - start_time:.4f}s")
     return contest
 
 
@@ -131,7 +130,7 @@ def get_contest_details(contest, user_id, start_time, time):
         )
 
     t2 = time.time()
-    logger.info(f"[get_contest_details] TOTAL TIME: {t2 - start_time:.4f}s")
+    current_app.logger.info(f"[get_contest_details] TOTAL TIME: {t2 - start_time:.4f}s")
     return (
         {
             "id": contest.id,

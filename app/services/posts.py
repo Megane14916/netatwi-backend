@@ -11,14 +11,10 @@ import json
 from flask import current_app
 from itsdangerous import URLSafeSerializer
 
-from app.runtime_dependencies import (
-    allowed_file,
-    calculate_weighted_length,
-    delete_file,
-    save_file,
-    route_logger as logger,
-)
-from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, Vote, db
+from app.integrations import images
+from app.services.text import calculate_weighted_length
+from app.extensions import db
+from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, Vote
 
 
 def _cleanup_signer():
@@ -32,10 +28,10 @@ def cleanup_images(urls):
         try:
             if _image_is_referenced(url):
                 raise ValueError("Image still referenced")
-            delete_file(url)
+            images.delete_file(url)
         except Exception:
             failures.append(url)
-            logger.error("IMAGE_CLEANUP_PENDING %s", json.dumps({"url": url, "token": _cleanup_signer().dumps(url)}))
+            current_app.logger.error("IMAGE_CLEANUP_PENDING %s", json.dumps({"url": url, "token": _cleanup_signer().dumps(url)}))
     return failures
 
 
@@ -86,13 +82,13 @@ def owned_image_deletions(post, urls):
         if url in owned and url not in shared:
             deletions.append(url)
         else:
-            logger.warning("Image deletion skipped without exclusive upload ownership; post_id=%s; url=%s", post.id, url)
+            current_app.logger.warning("Image deletion skipped without exclusive upload ownership; post_id=%s; url=%s", post.id, url)
     return deletions
 
 
 def validate_submission(content, files):
     valid_files = _valid_image_files(files)
-    if any(f and f.filename and not allowed_file(f.filename) for f in files):
+    if any(f and f.filename and not images.allowed_file(f.filename) for f in files):
         return {"error": "Unsupported image extension"}, 400
     if not content and not valid_files:
         return ({"error": "Content or images required"}), 400
@@ -115,7 +111,7 @@ def prepare_update(new_content, kept_images, files):
         new_content = ""
     if not isinstance(new_content, str):
         return new_content, ({"error": "Invalid content"}, 400)
-    if any(f and f.filename and not allowed_file(f.filename) for f in files):
+    if any(f and f.filename and not images.allowed_file(f.filename) for f in files):
         return new_content, ({"error": "Unsupported image extension"}, 400)
     valid_files = _valid_image_files(files)
     if len(kept_images) + len(valid_files) > 4:
@@ -134,12 +130,12 @@ def prepare_update(new_content, kept_images, files):
 
 
 def _valid_image_files(files):
-    return [file for file in files if file and file.filename and allowed_file(file.filename)]
+    return [file for file in files if file and file.filename and images.allowed_file(file.filename)]
 
 
 def _upload_images(files, urls):
     for file in files:
-        url = save_file(file)
+        url = images.save_file(file)
         if not isinstance(url, str) or not url:
             raise ValueError("Image storage returned no URL")
         urls.append(url)

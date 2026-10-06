@@ -4,12 +4,12 @@ import os
 
 from flask import jsonify, request, session
 
-from app.models import db
+from app.extensions import db
 from app.services import news as news_service
-from .legacy import LegacyEndpointBlueprint
+from flask import Blueprint
 
 
-bp = LegacyEndpointBlueprint("news", __name__)
+bp = Blueprint("news", __name__)
 
 
 @bp.route("/api/news", methods=["GET"])

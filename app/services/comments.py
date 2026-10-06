@@ -2,7 +2,8 @@
 
 from datetime import timedelta, timezone
 
-from app.models import Comment, Post, db
+from app.extensions import db
+from app.models import Comment, Post
 from app.services import notifications as notifications_service
 
 

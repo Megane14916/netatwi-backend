@@ -1,5 +1,7 @@
 """Contest post listing behavior captured before issue #46 extraction."""
 
+from flask import current_app
+
 import builtins
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -9,7 +11,8 @@ from sqlalchemy.orm import Query
 
 from app.routes import posts as routes
 from app.services import contest_posts as query_module
-from app.models import Comment, Post, Vote, db
+from app.extensions import db
+from app.models import Comment, Post, Vote
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
@@ -192,7 +195,7 @@ def test_clock_logs_and_session_read_order(client, entries, login, monkeypatch, 
     values = iter(range(10, 17))
     calls = clock(monkeypatch, lambda: next(values))
     logs = []
-    monkeypatch.setattr(query_module, "logger", SimpleNamespace(info=logs.append))
+    monkeypatch.setattr(current_app._get_current_object(), "logger", SimpleNamespace(info=logs.append))
 
     def read_session(key):
         assert key == "user_id"
@@ -230,7 +233,7 @@ def test_failures_keep_500_print_and_no_rollback(client, entries, login, monkeyp
 
         monkeypatch.setattr(Query, "all", query_failure)
     elif stage == "log":
-        monkeypatch.setattr(query_module, "logger", SimpleNamespace(info=fail))
+        monkeypatch.setattr(current_app._get_current_object(), "logger", SimpleNamespace(info=fail))
     elif stage == "format":
         monkeypatch.setattr(Post, "images", property(fail))
     elif stage == "session":

@@ -32,7 +32,6 @@ os.environ.update(
 )
 
 import app as app_module  # noqa: E402
-app_module.app  # Resolve the public entry before loading fakes and components.
 from app.services import notifications as notifications_service  # noqa: E402
 from app.services import contests as contest_service  # noqa: E402
 from app.services import interactions as interaction_service  # noqa: E402
@@ -42,8 +41,8 @@ from app.services import profile as profile_service  # noqa: E402
 from app.services import results as results_service  # noqa: E402
 from app.services import contest_lifecycle  # noqa: E402
 from app.services import voting as voting_service  # noqa: E402
-from app.integrations import cloud_tasks, x_oauth  # noqa: E402
-from app import db  # noqa: E402
+from app.integrations import cloud_tasks, x_oauth, images  # noqa: E402
+from app.extensions import db  # noqa: E402
 from app.models import Contest, User  # noqa: E402
 
 
@@ -69,16 +68,12 @@ def app():
         }
     )
     with flask_app.app_context():
-        contest_service._contests_cache = None
-        contest_service._contests_cache_time = 0
         db.create_all()
         try:
             yield flask_app
         finally:
             db.session.remove()
             db.drop_all()
-            contest_service._contests_cache = None
-            contest_service._contests_cache_time = 0
 
 
 @pytest.fixture
@@ -180,7 +175,6 @@ def fixed_time(monkeypatch):
             def now(cls, tz=None):
                 return moment.astimezone(tz) if tz else moment.replace(tzinfo=None)
 
-        monkeypatch.setattr(app_module, "datetime", FixedDateTime)
         monkeypatch.setattr(user_service, "datetime", FixedDateTime)
         monkeypatch.setattr(contest_service, "datetime", FixedDateTime)
         monkeypatch.setattr(post_service, "datetime", FixedDateTime)
@@ -208,25 +202,25 @@ def fake_x_authorization(monkeypatch):
 
 
 @pytest.fixture
-def fake_r2(monkeypatch):
+def fake_r2(app, monkeypatch):
     client = Mock()
-    monkeypatch.setattr(app_module, "USE_R2", True)
-    monkeypatch.setattr(app_module, "R2_BUCKET_NAME", "test-bucket")
-    monkeypatch.setattr(app_module, "R2_PUBLIC_URL", "https://r2.example")
-    monkeypatch.setattr(app_module, "get_r2_client", lambda: client)
+    monkeypatch.setitem(app.config, "USE_R2", True)
+    monkeypatch.setitem(app.config, "R2_BUCKET_NAME", "test-bucket")
+    monkeypatch.setitem(app.config, "R2_PUBLIC_URL", "https://r2.example")
+    monkeypatch.setitem(app.extensions, "r2_client", client)
     return client
 
 
 @pytest.fixture
-def fake_cloud_tasks(monkeypatch):
+def fake_cloud_tasks(app, monkeypatch):
     client = Mock()
     client.queue_path.return_value = "projects/test/locations/test/queues/test"
     client.create_task.return_value = SimpleNamespace(name="test-task")
-    monkeypatch.setattr(cloud_tasks, "_cloud_tasks_client", client)
-    monkeypatch.setenv("GCP_PROJECT_ID", "test")
-    monkeypatch.setenv("GCP_LOCATION", "test")
-    monkeypatch.setenv("GCP_QUEUE_NAME", "test")
-    monkeypatch.setenv("TASK_HANDLER_URL", "https://backend.example")
-    monkeypatch.setenv("TASKS_OIDC_AUDIENCE", "https://backend.example")
-    monkeypatch.setenv("TASKS_SERVICE_ACCOUNT_EMAIL", "tasks@example.iam.gserviceaccount.com")
+    monkeypatch.setitem(app.extensions, "cloud_tasks_client", client)
+    monkeypatch.setitem(app.config, "GCP_PROJECT_ID", "test")
+    monkeypatch.setitem(app.config, "GCP_LOCATION", "test")
+    monkeypatch.setitem(app.config, "GCP_QUEUE_NAME", "test")
+    monkeypatch.setitem(app.config, "TASK_HANDLER_URL", "https://backend.example")
+    monkeypatch.setitem(app.config, "TASKS_OIDC_AUDIENCE", "https://backend.example")
+    monkeypatch.setitem(app.config, "TASKS_SERVICE_ACCOUNT_EMAIL", "tasks@example.iam.gserviceaccount.com")
     return client

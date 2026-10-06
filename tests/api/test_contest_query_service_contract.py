@@ -1,5 +1,7 @@
 """Contest query behavior captured before the issue #45 extraction."""
 
+from flask import current_app
+
 import builtins
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -11,7 +13,8 @@ from app import create_app
 from app.routes import admin as admin_routes
 from app.routes import contests as public_routes
 from app.services import contests as query_module
-from app.models import Contest, ContestResult, Post, db
+from app.extensions import db
+from app.models import Contest, ContestResult, Post
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
@@ -198,36 +201,41 @@ def test_detail_qualifier_information_is_scoped_to_session_user_and_parent(
 def test_cache_ttl_boundary_and_clock_read_count(client, fixed_time, monkeypatch, elapsed, hit):
     fixed_time(NOW)
     cached = dict(EMPTY, latestResult={"cached": True})
-    query_module._contests_cache = cached
-    query_module._contests_cache_time = 100
+    query_module.contest_cache()["payload"] = cached
+    query_module.contest_cache()["time"] = 100
     times = clock(monkeypatch, lambda: 100 + elapsed)
     reads = observe_reads(monkeypatch)
     response = client.get("/api/contests")
     assert response.get_json() == (cached if hit else EMPTY)
     assert reads == ([] if hit else ["Contest"])
     assert len(times) == (1 if hit else 2)
-    assert query_module._contests_cache_time == (100 if hit else 100 + elapsed)
+    assert query_module.contest_cache()["time"] == (100 if hit else 100 + elapsed)
 
 
-def test_empty_database_payload_is_cached_and_shared_across_factory_apps(client, monkeypatch):
-    assert query_module._contests_cache is None
-    assert query_module._contests_cache_time == 0
+def test_empty_database_payload_is_cached_separately_across_factory_apps(client, monkeypatch):
+    assert query_module.contest_cache() == {"payload": None, "time": 0}
     times = clock(monkeypatch, lambda: 100)
     reads = observe_reads(monkeypatch)
     assert client.get("/api/contests").get_json() == EMPTY
-    assert query_module._contests_cache == EMPTY
-    first_cache = query_module._contests_cache
+    first_cache = query_module.contest_cache()["payload"]
     second = create_app({"TESTING": True, "SECRET_KEY": "another-app", "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:"})
-    assert second.test_client().get("/api/contests").get_json() == EMPTY
-    assert query_module._contests_cache is first_cache
-    assert reads == ["Contest"]
+    with second.app_context():
+        db.create_all()
+        try:
+            assert second.test_client().get("/api/contests").get_json() == EMPTY
+            assert query_module.contest_cache()["payload"] is not first_cache
+        finally:
+            db.session.remove()
+            db.drop_all()
+    assert query_module.contest_cache()["payload"] is first_cache
+    assert reads == ["Contest", "Contest"]
     assert len(times) == 2
 
 
 @pytest.mark.parametrize("cached", ({}, None))
 def test_falsy_cache_does_not_read_ttl_clock(client, monkeypatch, cached):
-    query_module._contests_cache = cached
-    query_module._contests_cache_time = 100
+    query_module.contest_cache()["payload"] = cached
+    query_module.contest_cache()["time"] = 100
     times = clock(monkeypatch, lambda: 101)
     reads = observe_reads(monkeypatch)
     assert client.get("/api/contests").get_json() == EMPTY
@@ -235,7 +243,7 @@ def test_falsy_cache_does_not_read_ttl_clock(client, monkeypatch, cached):
 
 
 def test_cache_hit_clock_failure_is_outside_exception_handler(client, monkeypatch):
-    query_module._contests_cache = dict(EMPTY)
+    query_module.contest_cache()["payload"] = dict(EMPTY)
 
     def fail():
         raise RuntimeError("clock failure")
@@ -246,7 +254,7 @@ def test_cache_hit_clock_failure_is_outside_exception_handler(client, monkeypatc
 
 
 def test_cache_store_clock_failure_keeps_new_payload_and_old_timestamp(client, monkeypatch):
-    query_module._contests_cache_time = 123
+    query_module.contest_cache()["time"] = 123
 
     def fail():
         raise RuntimeError("store clock failure")
@@ -254,8 +262,8 @@ def test_cache_store_clock_failure_keeps_new_payload_and_old_timestamp(client, m
     clock(monkeypatch, fail)
     response = client.get("/api/contests")
     assert response.status_code == 500 and response.get_json() == {"error": "Failed"}
-    assert query_module._contests_cache == EMPTY
-    assert query_module._contests_cache_time == 123
+    assert query_module.contest_cache()["payload"] == EMPTY
+    assert query_module.contest_cache()["time"] == 123
 
 
 def test_list_json_failure_is_caught_on_miss_and_propagates_on_hit(client, monkeypatch):
@@ -270,15 +278,15 @@ def test_list_json_failure_is_caught_on_miss_and_propagates_on_hit(client, monke
     monkeypatch.setattr(public_routes, "jsonify", fail_success)
     response = client.get("/api/contests")
     assert response.status_code == 500 and response.get_json() == {"error": "Failed"}
-    assert query_module._contests_cache == EMPTY
-    assert query_module._contests_cache_time == 100
+    assert query_module.contest_cache()["payload"] == EMPTY
+    assert query_module.contest_cache()["time"] == 100
     with pytest.raises(RuntimeError, match="JSON failure"):
         client.get("/api/contests")
 
 
 def test_stale_cache_survives_query_failure(client, monkeypatch):
     stale = dict(EMPTY, latestResult={"old": True})
-    query_module._contests_cache, query_module._contests_cache_time = stale, 100
+    query_module.contest_cache()["payload"], query_module.contest_cache()["time"] = stale, 100
     clock(monkeypatch, lambda: 106)
 
     def fail(_query):
@@ -287,14 +295,14 @@ def test_stale_cache_survives_query_failure(client, monkeypatch):
     monkeypatch.setattr(Query, "all", fail)
     response = client.get("/api/contests")
     assert response.status_code == 500 and response.get_json() == {"error": "Failed"}
-    assert query_module._contests_cache is stale and query_module._contests_cache_time == 100
+    assert query_module.contest_cache()["payload"] is stale and query_module.contest_cache()["time"] == 100
 
 
 def test_detail_clock_reads_and_log_messages_keep_original_order(client, rich_contest, monkeypatch):
     values = iter((10, 10.25, 11))
     times = clock(monkeypatch, lambda: next(values))
     logs = []
-    monkeypatch.setattr(query_module, "logger", SimpleNamespace(info=logs.append))
+    monkeypatch.setattr(current_app._get_current_object(), "logger", SimpleNamespace(info=logs.append))
     assert client.get(f"/api/contests/{rich_contest.id}").status_code == 200
     assert times == ["time"] * 3
     assert logs == ["[get_contest_details] get_or_404: 0.2500s", "[get_contest_details] TOTAL TIME: 1.0000s"]

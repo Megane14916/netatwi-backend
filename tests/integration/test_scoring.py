@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
-from app import db, generate_contest_results, get_cached_contest_results
+from app.extensions import db
+from app.services.results import generate_contest_results, get_cached_contest_results
 from app.models import Contest, ContestResult, Post, User, Vote
 
 

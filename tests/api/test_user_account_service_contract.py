@@ -12,7 +12,8 @@ from sqlalchemy.orm import Query
 from app.routes import account as account_routes
 from app.services import users as withdrawal_module
 from app.routes import users as directory_routes
-from app.models import Bookmark, Comment, ContestResult, Notification, Post, User, UserStats, Vote, db
+from app.extensions import db
+from app.models import Bookmark, Comment, ContestResult, Notification, Post, User, UserStats, Vote
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
@@ -274,13 +275,15 @@ def test_withdrawal_failures_keep_uncaught_exception_and_session_order(client, u
         assert user.deleted_at is not None  # Commit survives later response/session failure.
 
 
-def test_top_and_legacy_handler_names_remain_registered(app):
-    import app as entry
-    for application in (entry.app, app):
+def test_namespaced_handlers_and_url_for_remain_registered(app):
+    from app import create_app
+    from app.routes import account, core
+    production_app = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:"})
+    for application in (production_app, app):
         for endpoint, path in (("get_current_user", "/api/me"), ("logout", "/api/logout"), ("withdraw_user", "/api/users/me"), ("index", "/")):
-            assert getattr(entry, endpoint) is application.view_functions[endpoint]
+            assert getattr(core if endpoint == "index" else account, endpoint) is application.view_functions[("core." if endpoint == "index" else "account.") + endpoint]
             with application.test_request_context():
-                assert url_for(endpoint) == path
+                assert url_for(("core." if endpoint == "index" else "account.") + endpoint) == path
         response = application.test_client().get("/")
         assert response.status_code == 200 and response.get_data(as_text=True) == "ネタツイ大会バックエンド"
         assert response.content_type == "text/html; charset=utf-8"

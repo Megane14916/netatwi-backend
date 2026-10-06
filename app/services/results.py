@@ -5,7 +5,8 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import case, distinct, func
 from sqlalchemy.orm import joinedload
 
-from app.models import Bookmark, Comment, Contest, ContestResult, Post, User, Vote, db
+from app.extensions import db
+from app.models import Bookmark, Comment, Contest, ContestResult, Post, User, Vote
 
 
 JST = timezone(timedelta(hours=9), "JST")

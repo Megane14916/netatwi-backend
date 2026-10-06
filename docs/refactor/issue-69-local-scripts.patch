@@ -1,0 +1,6 @@
+--- a/calc_result.py
++++ b/calc_result.py
+@@ -1 +1,2 @@
+-from app import app, generate_contest_results
++from app import app
++from app.services.results import generate_contest_results

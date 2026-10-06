@@ -7,7 +7,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Query
 
 from app.routes import interactions as routes
-from app.models import Bookmark, Notification, Post, Vote, db
+from app.extensions import db
+from app.models import Bookmark, Notification, Post, Vote
 from app.services import notifications
 
 

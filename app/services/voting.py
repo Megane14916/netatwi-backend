@@ -7,8 +7,10 @@ and retains HTTP responses and the exception/rollback boundary.
 import time
 from datetime import datetime, timezone
 
-from app.runtime_dependencies import calculate_weighted_length, route_logger as logger
-from app.models import Contest, Post, Vote, db
+from app.services.text import calculate_weighted_length
+from flask import current_app
+from app.extensions import db
+from app.models import Contest, Post, Vote
 
 
 # Post.id uses PostgreSQL INTEGER (signed 32-bit), including in migrations.
@@ -44,7 +46,7 @@ def submit_votes(
     # 期間チェック（DELETEより前に行い、範囲外なら何も変更せず返す）
     c = Contest.query.get_or_404(id)
     t1 = time.time()
-    logger.info(f"==> [submit_votes] get_or_404 took: {t1 - t0:.4f}s")
+    current_app.logger.info(f"==> [submit_votes] get_or_404 took: {t1 - t0:.4f}s")
     now = datetime.now(timezone.utc)
     if not (
         c.end_time.replace(tzinfo=timezone.utc)
@@ -100,7 +102,7 @@ def submit_votes(
 
     Vote.query.filter_by(user_id=user_id, contest_id=id).delete()
     t2 = time.time()
-    logger.info(f"==> [submit_votes] delete took: {t2 - t1:.4f}s")
+    current_app.logger.info(f"==> [submit_votes] delete took: {t2 - t1:.4f}s")
 
     # --- 投票データの保存 ---
     # 1. 点数投票の保存
@@ -162,9 +164,9 @@ def submit_votes(
     # ----------------------------------------------------
 
     t3 = time.time()
-    logger.info(f"==> [submit_votes] loop took: {t3 - t2:.4f}s")
+    current_app.logger.info(f"==> [submit_votes] loop took: {t3 - t2:.4f}s")
     db.session.commit()
     t4 = time.time()
-    logger.info(f"==> [submit_votes] commit took: {t4 - t3:.4f}s")
-    logger.info(f"==> [submit_votes] FINISHED in {t4 - start_time:.4f}s")
+    current_app.logger.info(f"==> [submit_votes] commit took: {t4 - t3:.4f}s")
+    current_app.logger.info(f"==> [submit_votes] FINISHED in {t4 - start_time:.4f}s")
     return ({"message": "Voted"}), 200
