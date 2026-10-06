@@ -30,8 +30,8 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-# Keyword names preserve the original helper bodies. app.py passes its current
-# settings and callbacks on each invocation, including patched test doubles.
+# Keyword arguments retain the storage bodies while active app settings are
+# resolved by the public helpers below.
 def _save_file(
     file, *, UPLOAD_FOLDER, USE_R2, R2_BUCKET_NAME, R2_PUBLIC_URL, get_r2_client, logger
 ):

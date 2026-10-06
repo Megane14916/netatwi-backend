@@ -21,6 +21,9 @@
   SQL計測のmodule loggerは保持する。
 - app/runtime_dependencies.py、app/routes/dependencies.py、legacy_route_helpersと
   namespaceを参照するhelper callback、不要になった14のroot再公開名を撤去した。
+  管理外calc_result.pyの結果helperもcanonical serviceへ移行し、
+  [適用パッチ](issue-69-local-scripts.patch)を記録した（集計処理は実行していない）。
+  他checkoutではgit apply --unidiff-zero --checkで確認して適用する。
   root app/factoryの最終的なnamespace・遅延初期化・起動入口の撤去は#70で行う。
 
 ## fake・テスト移行
