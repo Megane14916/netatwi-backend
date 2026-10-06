@@ -45,11 +45,16 @@ def save_file(
             return f"{R2_PUBLIC_URL}/{unique_filename}"
         except Exception as e:
             logger.error(f"R2 Upload Error: {e}")
+            e.uploaded_image_url = f"{R2_PUBLIC_URL}/{unique_filename}"
             raise e
     else:
         # ローカル保存
         file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
-        file.save(file_path)
+        try:
+            file.save(file_path)
+        except Exception as e:
+            e.uploaded_image_url = f"/static/uploads/{unique_filename}"
+            raise
         # FlaskのstaticファイルとしてのURLを返す (本番ではFRONTEND_URL経由でアクセスできる前提)
         # ここではバックエンドのURLを返す必要がある (CORS等注意)
         # 開発環境では http://localhost:5001/static/uploads/... となる
@@ -76,6 +81,7 @@ def delete_file(
                 s3.delete_object(Bucket=R2_BUCKET_NAME, Key=filename)
             except Exception as e:
                 logger.error(f"Failed to delete from R2: {e}")
+                raise
         else:
             # ローカルから削除
             file_path = os.path.join(UPLOAD_FOLDER, filename)
@@ -84,6 +90,7 @@ def delete_file(
                 logger.info(f"Deleted local file: {file_path}")
     except Exception as e:
         logger.error(f"Error deleting file {file_url}: {e}")
+        raise
 
 
 def initialize_image_settings():
