@@ -18,6 +18,8 @@ from app.models import Post, db
     ("put", "text", 0, 0, "required"),
     ("put", "text", 2, 3, "optional"),
     ("put", "text", 0, 5, "optional"),
+    ("post", "text", 0, 1, "none"),
+    ("put", "text", 1, 0, "none"),
 ])
 def test_invalid_final_post_has_no_storage_or_db_effects(
     client, contest_factory, user_factory, login, fixed_time, monkeypatch,
