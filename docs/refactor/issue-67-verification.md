@@ -40,5 +40,6 @@ HTTP URL/method/endpoint/応答、DB schema、認証、画像補償、Tasks OIDC
 ## 検証
 
 Python 3.11.16、既存`.venv/issue53-env`、一時SQLite、外部通信拒否を使用。
-全体pytest（URL map、起動/CLI、全10モデル、Alembic差分ゼロを含む）とCIの結果は
-PR作成前に追記する。Issueは計画書の運用に従いmaster統合までopenを保持する。
+全体pytest 844件成功（145.37秒）。追加の旧import禁止ケースを含む関連23件成功。
+最終収集数は845件。URL map、起動/CLI、全10モデル、Alembic差分ゼロも成功。
+CIはPR #84で確認する。Issueは計画書の運用に従いmaster統合までopenを保持する。
