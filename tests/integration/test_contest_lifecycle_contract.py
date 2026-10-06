@@ -13,7 +13,8 @@ from google.cloud import tasks_v2
 
 import app as app_module
 from app.integrations import cloud_tasks
-from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, Vote, db
+from app.extensions import db
+from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, Vote
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)

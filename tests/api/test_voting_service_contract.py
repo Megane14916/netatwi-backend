@@ -10,7 +10,8 @@ from sqlalchemy import event
 from werkzeug.datastructures import ImmutableMultiDict
 
 import app as app_module
-from app.models import Contest, Post, Vote, db
+from app.extensions import db
+from app.models import Contest, Post, Vote
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)

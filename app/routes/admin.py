@@ -5,7 +5,7 @@ import traceback
 
 from flask import current_app, jsonify, request, session
 
-from app.models import db
+from app.extensions import db
 from app.integrations import cloud_tasks
 from app.services import contest_lifecycle
 from app.services import contests as contest_service

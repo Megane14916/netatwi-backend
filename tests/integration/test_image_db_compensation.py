@@ -9,7 +9,8 @@ from unittest.mock import Mock
 
 import pytest
 import app as app_module
-from app.models import Contest, Post, db
+from app.extensions import db
+from app.models import Contest, Post
 from app.services.posts import cleanup_images, _cleanup_signer
 
 

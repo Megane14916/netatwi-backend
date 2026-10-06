@@ -10,7 +10,8 @@ from functools import wraps
 
 from app.integrations import cloud_tasks
 
-from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, User, Vote, db
+from app.extensions import db
+from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, User, Vote
 from app.services import results as results_service
 
 

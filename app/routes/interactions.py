@@ -5,7 +5,7 @@ import traceback
 from flask import jsonify, request, session
 from sqlalchemy.exc import IntegrityError
 
-from app.models import db
+from app.extensions import db
 from app.services import interactions as interaction_service
 from flask import Blueprint
 

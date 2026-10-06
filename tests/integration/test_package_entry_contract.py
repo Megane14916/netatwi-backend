@@ -27,7 +27,7 @@ def run_isolated(source, *, environment=None):
 
 
 @pytest.mark.parametrize("module", [
-    "app.models", "app.models.user", "app.services.posts", "app.services.contests",
+    "app", "app.models", "app.models.user", "app.services.posts", "app.services.contests",
     "app.integrations.cloud_tasks", "app.integrations.images", "app.cli.user_stats",
     "app.factory", "app.config", "app.extensions", "app.hooks", "app.services.text",
 ])
@@ -82,11 +82,13 @@ def test_cold_direct_entry_creates_only_one_app_and_upload_directory():
         with patch.object(Flask, "__init__", init), patch.object(Flask, "run", server), patch.object(SQLAlchemy, "create_all", create_all), patch.object(os, "makedirs", mkdir), patch.object(socket.socket, "connect", reject):
             loaded = runpy.run_path("app.py", run_name="__main__")
         assert counts == {"apps": 1, "uploads": 1, "tables": 1, "server": 1}
-        assert loaded["logger"].name == "__main__"
+        assert "app" not in loaded
+        import app
+        assert "app" not in vars(app)
     ''')
 
 
-def test_public_entry_repeated_imports_do_not_repeat_initialization():
+def test_wsgi_repeated_imports_do_not_repeat_initialization():
     run_isolated('''
         import importlib, os
         from flask import Flask
@@ -101,18 +103,21 @@ def test_public_entry_repeated_imports_do_not_repeat_initialization():
             return original_makedirs(path, *args, **kwargs)
         with patch.object(Flask, "__init__", init), patch.object(os, "makedirs", mkdir):
             import app
-            first = app.app
-            from app import app as again, create_app, db
-            assert first is again is importlib.import_module("app").app
-            assert first.extensions["sqlalchemy"] is db
+            from app import create_app
+            assert counts == {"apps": 0, "uploads": 0}
+            import wsgi
+            from wsgi import app as again
+            assert wsgi.app is again is importlib.import_module("wsgi").app
+            from app.extensions import db
+            assert again.extensions["sqlalchemy"] is db
             other = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:"})
-            assert other is not first
+            assert other is not again
         assert counts == {"apps": 2, "uploads": 2}
     ''')
 
 
-def test_resource_and_instance_paths_stay_at_repository_root():
-    for application in (app_module.app, app_module.create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:"})):
+def test_resource_and_instance_paths_stay_at_repository_root(app):
+    for application in (app, app_module.create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:"})):
         assert Path(application.root_path) == ROOT
         assert Path(application.static_folder) == ROOT / "static"
         assert Path(application.instance_path) == ROOT / "instance"

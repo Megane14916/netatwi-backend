@@ -1,4 +1,4 @@
-from .base import db
+from app.extensions import db
 
 
 class Contest(db.Model):

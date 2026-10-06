@@ -5,7 +5,8 @@ from datetime import timedelta
 from pathlib import Path
 
 import app.config as app_config
-from app import app as production_app, create_app
+from app import create_app
+production_app = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:"})
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.exceptions import RequestEntityTooLarge
 

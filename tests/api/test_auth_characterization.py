@@ -9,7 +9,8 @@ import pytest
 import requests
 
 from app.integrations import x_oauth
-from app.models import User, db
+from app.extensions import db
+from app.models import User
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)

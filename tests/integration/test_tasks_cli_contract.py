@@ -6,7 +6,8 @@ import pytest
 
 import app as app_module
 from app.services import results as results_service
-from app.models import Contest, ContestResult, Notification, Post, UserStats, db
+from app.extensions import db
+from app.models import Contest, ContestResult, Notification, Post, UserStats
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
@@ -300,10 +301,7 @@ def test_task_and_cli_registration_preserve_compatibility_names(app):
     from app.cli.process_contests import process_contests_command
     from app.cli.user_stats import update_user_stats
 
-    assert app_module.handle_contest_task is handle_contest_task
-    assert app_module.process_contests_command is process_contests_command
-    assert app_module.update_user_stats is update_user_stats
-    for application in (app_module.app, app):
+    for application in (app_module.create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:"}), app):
         assert "tasks" in application.blueprints
         assert application.view_functions["tasks.handle_contest_task"] is handle_contest_task
         assert application.cli.commands["process-contests"] is process_contests_command

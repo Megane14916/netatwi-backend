@@ -3,7 +3,8 @@
 
 def update_user_stats():
     """Update UserStats table by aggregating ContestResult data"""
-    from app.models import Contest, ContestResult, User, UserStats, db
+    from app.extensions import db
+    from app.models import Contest, ContestResult, User, UserStats
     from sqlalchemy import case, func
 
     print("--- update-user-stats batch started ---")

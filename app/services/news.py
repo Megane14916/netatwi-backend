@@ -1,6 +1,7 @@
 """News queries, tweet ID parsing and database writes with original boundaries."""
 
-from app.models import News, db
+from app.extensions import db
+from app.models import News
 
 
 def get_news():

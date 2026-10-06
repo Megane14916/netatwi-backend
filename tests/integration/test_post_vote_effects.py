@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
 import app as app_module
-from app import db
+from app.extensions import db
 from app.models import Contest, Post, Vote
 
 

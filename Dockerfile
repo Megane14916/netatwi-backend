@@ -14,4 +14,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 4. コンテナ実行コマンド
 # Cloud Runは環境変数 $PORT でリッスンするポートを指定してくる
 # gunicornを 0.0.0.0:$PORT で起動
-CMD exec gunicorn --bind "0.0.0.0:${PORT}" --workers 1 --threads 8 --timeout 0 "app:app"
+CMD exec gunicorn --bind "0.0.0.0:${PORT}" --workers 1 --threads 8 --timeout 0 "wsgi:app"

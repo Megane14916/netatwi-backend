@@ -5,7 +5,8 @@ from flask import current_app
 
 from flask import jsonify, request, session
 
-from app.models import User, db
+from app.extensions import db
+from app.models import User
 
 
 
