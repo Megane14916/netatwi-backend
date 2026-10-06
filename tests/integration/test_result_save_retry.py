@@ -10,7 +10,7 @@ from app.models import Contest, ContestResult, Notification, Post, db
 @pytest.mark.parametrize("entry", ["task", "cli"])
 @pytest.mark.parametrize("failure", ["bulk", "commit", "notification"])
 def test_result_failure_rolls_back_and_retry_runs_once(
-    client, runner, contest_factory, user_factory, fixed_time, monkeypatch, entry, failure
+    task_client, runner, contest_factory, user_factory, fixed_time, monkeypatch, entry, failure
 ):
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     user = user_factory("author")
@@ -30,7 +30,7 @@ def test_result_failure_rolls_back_and_retry_runs_once(
 
     def invoke():
         if entry == "task":
-            return client.post(f"/api/tasks/contest/{contest_id}/result_announce")
+            return task_client.post(f"/api/tasks/contest/{contest_id}/result_announce")
         return runner.invoke(args=["process-contests"])
 
     monkeypatch.setattr(db.session, method, fail)
