@@ -1,8 +1,8 @@
 # 順11の実装・検証記録（2026-10-06）
 
-各作業は最新のfix/step-11-bugsから分岐し、再現テスト→定期commit→修正→
+以下は開発ブランチへの初回取り込み時の記録である。各作業は最新のfix/step-11-bugsから分岐し、再現テスト→定期commit→修正→
 全体pytest/CI成功→自己レビュー→個別PRを同branchへmerge→取り込み後テストを
-順番に実施した。第三者レビューは未実施。masterは変更していない。
+順番に実施した。初回取り込み時点では第三者レビューは未実施、masterも未変更だった。
 
 | Issue/範囲 | 取り込みPR | 全体pytest成功件数 | 取り込み後関連検証 | 記録 |
 | --- | --- | ---: | ---: | --- |
@@ -38,12 +38,23 @@ DB schema/migrationは変更せず、修正前に失敗する再現を追加し�
 そのうち最初の36ケースを修正前に実行し、24失敗・12成功を確認した。
 修正後の関連2ファイルは、互換性4ケースの追加前に107件成功した。
 最終コードの全体pytestは844件成功（Python 3.11.16、一時SQLite、通信拒否）。
-DB schema/migration、採点式、通常投票者の賞無視、master、本番環境は変更しない。
+DB schema/migration、採点式、通常投票者の賞無視、本番環境は変更しない。
+
+## masterへの統合（2026-10-06）
+
+レビュー後の追加修正`61915d1f80c1053c5d9d59ec522c9ab697c7101c`を含め、
+統合PR [#73](https://github.com/Megane14916/netatwi-backend/pull/73)をmasterへマージした。
+マージコミットは`5fee097d39888387afaa4d0ae53f6637c30b6375`。
+最終実装の全844テストと[GitHub Actions](https://github.com/Megane14916/netatwi-backend/actions/runs/37425048178)が成功した。
+本番デプロイ元はdevブランチで、このmaster統合では本番反映していない。
+順12はこのmasterを基準に`refactor/step-12-structure`で進める。
 
 ## 保留・残件
 
-- master向け統合PR [#73](https://github.com/Megane14916/netatwi-backend/pull/73)はdraft・未マージ。
-  個別Issueは計画どおりopenのまま、fix/step-11-bugs取り込み済みと記録する。
+- Issueは自動closeせず、未完了範囲と本番照合の有無を確認して完了状態を管理する。
+- 結果処理が並行すると結果行・通知が重複する既存不具合は、追加の処理交差テストで
+  現在の実装と旧masterの双方で再現した。ユーザー指定により今回は修正せず統合した。
+  順12へ業務処理の修正を混ぜず、対応する場合は別Issue／PRの範囲を明記する。
 - #23の本番project/service/IAM/Ingress/queue OIDC override/retryConfig照合と実task試験は
   ユーザーの「一旦この本番照合の工程はスキップしてください」により今回除外した。
   認証コード/隔離試験の完了を本番確認の完了と混同しない。展開前に実施する。
@@ -53,5 +64,6 @@ DB schema/migration、採点式、通常投票者の賞無視、master、本番�
   強制終了で補償が走らない不要画像はstorage履歴とDBを照合して個別復旧する。
 - 本番DB/ストレージ/GCP設定の変更、デプロイ、順12/13の作業は行っていない。
 
-master基準は引き続き`beca003aaf881e03c8b7e4acb40ba0f410d6c2c3`。
+順11開始時のmaster基準は`beca003aaf881e03c8b7e4acb40ba0f410d6c2c3`、
+順12開始時のmaster基準は`5fee097d39888387afaa4d0ae53f6637c30b6375`。
 全PRのCIリンクと各修正の影響・戻し方はPR本文と上記個別記録にある。
