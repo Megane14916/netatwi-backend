@@ -4,10 +4,10 @@ import os
 
 from flask import jsonify, session
 from app.services import users as user_service
-from .legacy import LegacyEndpointBlueprint
+from flask import Blueprint
 
 
-bp = LegacyEndpointBlueprint("account", __name__)
+bp = Blueprint("account", __name__)
 
 
 @bp.route("/api/me")

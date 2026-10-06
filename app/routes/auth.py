@@ -8,10 +8,10 @@ from flask import current_app, jsonify, redirect, request, session
 from app.extensions import limiter
 from app.models import db
 from app.services import auth as auth_service
-from .legacy import LegacyEndpointBlueprint
+from flask import Blueprint
 
 
-bp = LegacyEndpointBlueprint("auth", __name__)
+bp = Blueprint("auth", __name__)
 logger = logging.getLogger("app")
 
 

@@ -8,10 +8,10 @@ from flask import current_app, jsonify, request, session
 from app.models import db
 from app.services import contest_lifecycle
 from app.services import contests as contest_service
-from .legacy import LegacyEndpointBlueprint
+from flask import Blueprint
 
 
-bp = LegacyEndpointBlueprint("admin", __name__)
+bp = Blueprint("admin", __name__)
 
 
 def schedule_contest_task(*args):

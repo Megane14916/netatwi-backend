@@ -3,10 +3,10 @@
 from flask import jsonify, session
 
 from app.services import contests as contest_service
-from .legacy import LegacyEndpointBlueprint
+from flask import Blueprint
 
 
-bp = LegacyEndpointBlueprint("contests", __name__)
+bp = Blueprint("contests", __name__)
 
 
 @bp.route("/api/contests")
