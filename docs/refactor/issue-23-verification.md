@@ -50,8 +50,10 @@ retryConfigの回数/期間/backoffを記録し、503と業務失敗が再試行
 新しいoidc_token以外のURL・予定時刻・通知/結果・CLI契約は維持する。
 全体pytest/CIの件数はPRへ記録する。schema変更なし。
 
-本番のproject/service/IAM/Ingress/queue override/retryConfigはユーザー提供情報待ち。
+本番のproject/service/IAM/Ingress/queue override/retryConfigの照合は未実施。
 ローカル.envに対象設定はなく、gcloud接続もない。サインイン済みコンソールの閲覧は
 自動承認レビューで拒否され、ユーザーは設定情報を自分で提供する方針を選んだ。
-提供情報との照合が済むまで、本Issueの本番確認を完了扱いにしない。
+その後ユーザーが「一旦この本番照合の工程はスキップしてください」と指定したため、
+今回の作業範囲から除外する。実環境への展開前には上記照合と正規task試験が必要。
+認証実装/隔離検証の完了と、本番確認の未実施を区別する。
 やってないこと: 本番設定変更、外部client/config分離(#69)、構成整理、masterマージ。
