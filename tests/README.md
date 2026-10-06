@@ -12,6 +12,10 @@ macOS／Linux では `python3.11 -m venv .venv` を実行し、以後は `.venv/
 
 GitHub Actions も Python 3.11 で同じ `python -m pytest -q` を実行する。
 
+個人用の補助スクリプトはGit管理外の `scripts/` に置く。
+CIでその存在を必須にせず、アプリ・WSGI・CLIの契約を検証する。
+配置と他checkoutへの移行手順は [補助スクリプトの運用](../docs/local-scripts.md) を参照する。
+
 ## 順12の起動入口と現在の検証
 
 packageのimportはappを生成しない。`from app import create_app`でfactoryを取得し、
