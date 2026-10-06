@@ -2,7 +2,7 @@
 
 import logging
 
-from flask import jsonify, request, session
+from flask import jsonify, request
 
 
 logger = logging.getLogger("app")
@@ -26,12 +26,8 @@ def log_request_info():
     if request.path.startswith("/api/login") or request.path.startswith(
         "/api/callback"
     ):
-        logger.info(f"=== REQUEST START: {request.path} ===")
-        logger.info(f"Headers: {dict(request.headers)}")
-        logger.info(f"Cookies sent from browser: {request.cookies}")
-        logger.info(f"Session (before processing): {dict(session)}")
-        logger.info(f"X-Forwarded-Proto: {request.headers.get('X-Forwarded-Proto')}")
-        logger.info(f"Is Secure (Flask detected): {request.is_secure}")
+        logger.info("OAuth request started; endpoint=%s; secure=%s",
+                    request.endpoint, request.is_secure)
 
 
 def add_cache_control_headers(response):

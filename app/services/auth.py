@@ -13,7 +13,7 @@ logger = logging.getLogger("app")
 
 def start_twitter_login():
     callback_url = f"{current_app.config['FRONTEND_URL']}/api/callback/twitter"
-    logger.info(f"Generated Callback URL: {callback_url}")
+    logger.info("Starting X authorization")
 
     authorization_url, state, code_verifier = x_oauth.build_authorization(callback_url)
 
@@ -25,14 +25,15 @@ def start_twitter_login():
         session["judge_for_contest_ids"] = judge_ids
     session.modified = True
 
-    logger.info(f"Saved to session - State: {state}")
+    logger.info("OAuth verification data saved to session")
 
     return authorization_url
 
 
 def begin_twitter_callback():
     logger.info(f"=== CALLBACK START ===")
-    logger.info(f"Session keys present: {list(session.keys())}")
+    logger.info("OAuth verification data present: state=%s; verifier=%s",
+                bool(session.get("oauth_state")), bool(session.get("code_verifier")))
 
     # セッションから検証用データを取得・削除
     session_state = session.pop("oauth_state", None)
@@ -43,7 +44,7 @@ def begin_twitter_callback():
 
 def validate_twitter_callback(session_state, code_verifier, url_state, code, error):
     if error:
-        logger.error(f"X Login Error from URL: {error}")
+        logger.error("X login rejected by authorization provider")
         return error
 
     if not all([session_state, code_verifier, code]):
@@ -53,7 +54,7 @@ def validate_twitter_callback(session_state, code_verifier, url_state, code, err
 
     # state の一致検証（CSRF対策）
     if url_state != session_state:
-        logger.error(f"State mismatch: url={url_state}, session={session_state}")
+        logger.error("OAuth state mismatch")
         return "state_mismatch"
 
 
@@ -102,7 +103,7 @@ def sync_twitter_user(user_data):
     session["name"] = user.name
     session["profile_image_url"] = user.profile_image_url
 
-    logger.info(f"Login successful for user: {user.screen_name}")
+    logger.info("X login successful")
 
 
 def authenticate_judge(id, password):

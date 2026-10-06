@@ -17,6 +17,39 @@ VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 FRONTEND = "http://localhost:3000"
 
 
+@pytest.mark.parametrize("flow", ["login", "login_failure", "success", "mismatch", "error", "http", "fetch"])
+def test_oauth_logs_never_contain_request_session_token_or_error_secrets(
+    client, fake_oauth, caplog, capsys, flow
+):
+    secret = "sensitive-value-do-not-log"
+    with client.session_transaction() as session:
+        session.update(oauth_state=secret + "-state", code_verifier=secret + "-verifier")
+        session[secret + "-key"] = secret + "-value"
+    client.set_cookie("private", secret + "-cookie")
+    session_cookie = client.get_cookie("session").value
+    token = secret + "-token"
+    fake_oauth.oauth.return_value.fetch_token.return_value = {"access_token": token}
+    if flow == "login_failure":
+        fake_oauth.oauth.return_value.authorization_url.side_effect = RuntimeError(secret)
+    elif flow == "http":
+        fake_oauth.response.status_code = 403
+        fake_oauth.response.text = secret + "-body"
+        fake_oauth.response.raise_for_status.side_effect = requests.HTTPError(secret)
+    elif flow == "fetch":
+        fake_oauth.oauth.return_value.fetch_token.side_effect = RuntimeError(secret)
+    headers = {"Authorization": "Bearer " + secret, "X-Forwarded-Proto": "https"}
+    path = "/api/login/twitter" if flow.startswith("login") else "/api/callback/twitter"
+    state = "mismatch-" + secret if flow == "mismatch" else secret + "-state"
+    with caplog.at_level("INFO", logger="app"):
+        client.get(path, headers=headers, query_string={"state": state, "code": secret + "-code",
+                                                       **({"error": secret + "-error"} if flow == "error" else {})})
+    output = capsys.readouterr()
+    assert secret not in caplog.text + output.out + output.err
+    assert token[:10] not in caplog.text
+    assert session_cookie not in caplog.text + output.out + output.err
+    assert "OAuth request" in caplog.text
+
+
 @pytest.fixture
 def fake_oauth(monkeypatch):
     oauth = Mock()
@@ -84,8 +117,8 @@ def test_oauth_start_preserves_pkce_scope_session_and_logs(client, fake_oauth, c
         }
     assert [r.getMessage() for r in caplog.records if r.name == "app"
             and r.filename in ("auth.py", "x_oauth.py")] == [
-        f"Generated Callback URL: {FRONTEND}/api/callback/twitter",
-        "Saved to session - State: oauth-state",
+        "Starting X authorization",
+        "OAuth verification data saved to session",
     ]
 
 
@@ -98,7 +131,7 @@ def test_oauth_start_failure_keeps_previous_session(client, fake_oauth, caplog):
     with client.session_transaction() as session:
         assert session["oauth_state"] == "oauth-state"
         assert session["unrelated"] == "keep"
-    assert "!!! ERROR at /api/login/twitter: authorization failed" in caplog.text
+    assert "X authorization failed; exception_type=RuntimeError" in caplog.text
 
 
 @pytest.mark.parametrize("existing", (False, True))
@@ -144,9 +177,9 @@ def test_callback_syncs_user_commits_then_sets_session(
                 and r.filename in ("auth.py", "x_oauth.py")]
     assert messages == [
         "=== CALLBACK START ===",
-        "Session keys present: ['code_verifier', 'judge_for_contest_ids', 'oauth_state', 'unrelated']",
-        "Access Token successfully fetched (starts with: test-acces...)",
-        "Login successful for user: updated",
+        "OAuth verification data present: state=True; verifier=True",
+        "X access token fetched successfully",
+        "X login successful",
     ]
 
 
@@ -201,8 +234,8 @@ def test_callback_failures_rollback_and_preserve_other_session_data(
     with client.session_transaction() as session:
         assert dict(session) == {"judge_for_contest_ids": [9], "unrelated": "keep"}
     if failure == "http":
-        assert "X API Error Response Body: X error body" in caplog.text
-    assert "!!! ERROR at /api/callback/twitter:" in caplog.text
+        assert "X user-info request failed; status=403" in caplog.text
+    assert "X callback failed; exception_type=" in caplog.text
 
 
 def test_deleted_user_callback_does_not_update_or_commit(
