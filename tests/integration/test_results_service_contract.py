@@ -78,43 +78,35 @@ def test_empty_generation_still_bulk_saves_and_commits_on_every_run(contest_fact
 
 
 @pytest.mark.parametrize("failure", ["bulk", "commit"])
-def test_generation_bulk_failure_propagates_but_commit_failure_is_swallowed(
+def test_generation_persistence_failure_rolls_back_and_propagates(
     finished, monkeypatch, capsys, failure
 ):
     contest, _, _ = finished
     events = observe_writes(monkeypatch, failure)
-    if failure == "bulk":
-        with pytest.raises(RuntimeError, match="bulk failed"):
-            app_module.generate_contest_results(contest.id)
-        assert events == [("results", 1)]
-        assert capsys.readouterr().out == ""
-    else:
-        assert app_module.generate_contest_results(contest.id) is None
-        assert events == [("results", 1), "commit", "rollback"]
-        assert capsys.readouterr().out == "Failed to save ContestResult: commit failed\n"
+    with pytest.raises(RuntimeError, match=f"{failure} failed"):
+        app_module.generate_contest_results(contest.id)
+    assert events == [("results", 1)] + (["commit"] if failure == "commit" else []) + ["rollback"]
+    assert capsys.readouterr().out == ""
     assert ContestResult.query.count() == 0
 
 
 @pytest.mark.parametrize("entry_point", ["task", "app.cli"])
-def test_swallowed_result_commit_failure_still_allows_notification_commit(
+def test_result_commit_failure_prevents_notification_commit(
     client, runner, finished, monkeypatch, entry_point
 ):
     contest, author, _ = finished
     events = observe_writes(monkeypatch, "commit")
     if entry_point == "task":
-        response = client.post(f"/api/tasks/contest/{contest.id}/result_announce")
-        assert response.status_code == 200
-        assert response.get_json() == {"message": "Processed result_announce"}
+        with pytest.raises(RuntimeError, match="commit failed"):
+            client.post(f"/api/tasks/contest/{contest.id}/result_announce")
     else:
         result = runner.invoke(args=["process-contests"])
-        assert result.exit_code == 0
-        assert "Failed to save ContestResult: commit failed\n" in result.output
-    assert events == [("results", 1), "commit", "rollback", "commit"]
+        assert result.exit_code == 1
+        assert str(result.exception) == "commit failed"
+    assert events == [("results", 1), "commit", "rollback"]
     assert ContestResult.query.count() == 0
-    notification = Notification.query.one()
-    assert (notification.user_id, notification.contest_id, notification.type) == (
-        author.id, contest.id, "contest_result_announce")
-    assert contest.notified_result_announce is True
+    assert Notification.query.count() == 0
+    assert contest.notified_result_announce is False
 
 
 def test_rounded_scores_define_tied_rank_and_advancement_cutoff(finished, user_factory):

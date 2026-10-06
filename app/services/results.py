@@ -11,7 +11,7 @@ from app.models import Bookmark, Comment, Contest, ContestResult, Post, User, Vo
 JST = timezone(timedelta(hours=9), "JST")
 
 
-def generate_contest_results(contest_id):
+def generate_contest_results(contest_id, *, commit=True):
     """
     定期バッチ専用：結果を集計し、ContestResult に保存する。
     """
@@ -125,13 +125,15 @@ def generate_contest_results(contest_id):
         )
         results_to_insert.append(cr)
 
-    db.session.bulk_save_objects(results_to_insert)
-
     try:
-        db.session.commit()
-    except Exception as e:
+        db.session.bulk_save_objects(results_to_insert)
+        if commit:
+            db.session.commit()
+        else:
+            db.session.flush()
+    except Exception:
         db.session.rollback()
-        print(f"Failed to save ContestResult: {e}")
+        raise
 
 
 def get_cached_contest_results(contest_id):

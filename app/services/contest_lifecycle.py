@@ -6,6 +6,7 @@ Tasks integration through app.py's compatibility entry point.
 """
 
 from datetime import datetime, timedelta, timezone
+from functools import wraps
 
 from app.runtime_dependencies import schedule_contest_task
 
@@ -277,6 +278,19 @@ def delete_contest(id):
     return ({"message": "大会が正常に削除されました。"}), 200
 
 
+def _rollback_on_failure(operation):
+    """Leave the current contest retryable when any persistence step fails."""
+    @wraps(operation)
+    def run(*args, **kwargs):
+        try:
+            return operation(*args, **kwargs)
+        except Exception:
+            db.session.rollback()
+            raise
+    return run
+
+
+@_rollback_on_failure
 def handle_contest_task(id, event_type):
     contest = Contest.query.get(id)
     if not contest:
@@ -334,7 +348,7 @@ def handle_contest_task(id, event_type):
             print(
                 f"[{contest.id}] Result announce notification & calculation (Cloud Tasks)"
             )
-            results_service.generate_contest_results(contest.id)
+            results_service.generate_contest_results(contest.id, commit=False)
             user_ids = db.session.query(User.id).all()
             notifications = [
                 {
@@ -357,6 +371,7 @@ def handle_contest_task(id, event_type):
     ), 200
 
 
+@_rollback_on_failure
 def process_contests():
     """定期実行バッチ: 大会の状態変化を検知して通知送信や結果集計を行う"""
     print("--- process-contests batch started ---")
@@ -410,7 +425,7 @@ def process_contests():
             and not contest.notified_result_announce
         ):
             print(f"[{contest.id}] Result announce notification & calculation")
-            results_service.generate_contest_results(contest.id)
+            results_service.generate_contest_results(contest.id, commit=False)
             if all_users is None:
                 all_users = User.query.all()
             for u in all_users:
