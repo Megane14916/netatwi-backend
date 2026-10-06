@@ -1,4 +1,4 @@
-"""Verify the canonical package and its legacy compatibility connections."""
+"""Verify canonical imports after removing migration aliases (#67)."""
 
 import ast
 from importlib import import_module
@@ -24,30 +24,21 @@ def test_package_wins_over_same_named_script_and_handlers_live_in_package():
     assert all(m.class_.__module__.startswith("app.models.") for m in app.db.Model.registry.mappers)
 
 
-def test_legacy_modules_share_canonical_bodies_and_mutable_module_state():
-    flat = {"app_factory": "factory", "app_config": "config", "app_extensions": "extensions", "app_hooks": "hooks", "runtime_dependencies": "runtime_dependencies"}
-    for old, new in flat.items():
-        assert import_module(old) is import_module("app." + new)
-    groups = {"models": "models", "blueprints": "routes", "services": "services", "integrations": "integrations", "cli": "cli"}
-    for old, new in groups.items():
-        legacy_root = import_module(old)
-        canonical_root = import_module("app." + new)
-        if old not in {"services", "integrations"}:
-            assert legacy_root is canonical_root
+def test_canonical_modules_are_unique_and_all_models_use_one_db():
+    for new in ("models", "routes", "services", "integrations", "cli"):
         for path in (PACKAGE / new).glob("*.py"):
             if path.name == "__init__.py":
                 continue
             canonical = import_module(f"app.{new}.{path.stem}")
-            assert import_module(f"{old}.{path.stem}") is canonical
+            assert import_module(f"app.{new}.{path.stem}") is canonical
             assert Path(canonical.__file__) == path
-    assert import_module("models.base").db is app.db
+    assert import_module("app.models.base").db is app.db
 
 
-def test_legacy_cloud_tasks_cache_patch_is_seen_by_canonical_module(monkeypatch):
-    old = import_module("integrations.cloud_tasks")
+def test_cloud_tasks_fake_is_connected_to_the_actual_client(monkeypatch):
     canonical = import_module("app.integrations.cloud_tasks")
     cache = object()
-    monkeypatch.setattr(old, "_cloud_tasks_client", cache)
+    monkeypatch.setattr(canonical, "_cloud_tasks_client", cache)
     assert canonical._cloud_tasks_client is cache
     assert app.cloud_tasks is canonical
 
@@ -83,6 +74,27 @@ def test_canonical_imports_do_not_use_legacy_paths_or_service_to_route_dependenc
                     assert not node.module.startswith("app.routes"), path
             elif isinstance(node, ast.Import):
                 assert all(a.name.split(".")[0] not in legacy for a in node.names), path
+
+
+def test_application_and_cli_work_when_legacy_imports_are_forbidden():
+    run_isolated('''
+        import importlib.abc, sys
+        legacy = {"models", "blueprints", "services", "integrations", "cli", "app_factory", "app_config", "app_extensions", "app_hooks", "runtime_dependencies"}
+        class RejectLegacy(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname.split(".")[0] in legacy:
+                    raise AssertionError("Legacy import: " + fullname)
+        sys.meta_path.insert(0, RejectLegacy())
+        from app import create_app
+        from app.extensions import db
+        from app.models import User
+        application = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:"})
+        assert application.test_client().get("/api/me").get_json() == {"logged_in": False}
+        assert application.test_cli_runner().invoke(args=["--help"]).exit_code == 0
+        assert application.extensions["sqlalchemy"] is db
+        assert len(db.Model.registry.mappers) == 10
+        assert User.__module__ == "app.models.user"
+    ''')
 
 
 def test_failed_public_resolution_can_retry_without_a_partial_application():
