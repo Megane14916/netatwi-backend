@@ -86,6 +86,113 @@ def seed_vote(contest, voter, post, judge=False):
     return vote
 
 
+@pytest.mark.parametrize("award", [[], False, 0, "", {}])
+@pytest.mark.parametrize("with_scores", [False, True])
+def test_falsy_invalid_award_preserves_existing_vote_and_counters(
+    client, voting, login, award, with_scores
+):
+    contest, voter, post, _, path = voting
+    vote = seed_vote(contest, voter, post, judge=True)
+    vote.is_judge_award = True
+    vote.judge_comment = "Existing award"
+    db.session.commit()
+    vote_id = vote.id
+    login(voter, judge_contests=[contest.id])
+
+    response = client.post(path, json={
+        "votes": {str(post.id): 3} if with_scores else {}, "judgeAward": award,
+    })
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Invalid judge award"}
+    db.session.expire_all()
+    saved = Vote.query.one()
+    assert (saved.id, saved.post_id, saved.count, saved.is_judge_award, saved.judge_comment) == (
+        vote_id, post.id, 1, True, "Existing award",
+    )
+    assert counts(contest) == (1, 1)
+
+
+@pytest.mark.parametrize("include_null", [False, True])
+@pytest.mark.parametrize("with_scores", [False, True])
+def test_missing_or_null_award_allows_intentional_replacement(
+    client, voting, login, include_null, with_scores
+):
+    contest, voter, post, _, path = voting
+    vote = seed_vote(contest, voter, post, judge=True)
+    vote.is_judge_award = True
+    db.session.commit()
+    login(voter, judge_contests=[contest.id])
+    payload = {"votes": {str(post.id): 3} if with_scores else {}}
+    if include_null:
+        payload["judgeAward"] = None
+
+    assert client.post(path, json=payload).status_code == 200
+    if with_scores:
+        saved = Vote.query.one()
+        assert saved.count == 3
+        assert saved.is_judge_vote is True
+        assert saved.is_judge_award is False
+        assert counts(contest) == (1, 1)
+    else:
+        assert Vote.query.count() == 0
+        assert counts(contest) == (0, 0)
+
+
+@pytest.mark.parametrize("post_id", [0, -1, 2**31, 2**63, 10**100])
+@pytest.mark.parametrize("kind", ["vote", "award"])
+def test_out_of_range_post_id_is_rejected_before_target_query(
+    client, voting, login, post_id, kind
+):
+    contest, voter, post, _, path = voting
+    vote = seed_vote(contest, voter, post, judge=True)
+    vote.is_judge_award = True
+    vote.judge_comment = "Existing award"
+    db.session.commit()
+    vote_id = vote.id
+    login(voter, judge_contests=[contest.id])
+    payload = {"votes": {str(post_id): 1}} if kind == "vote" else {
+        "votes": {}, "judgeAward": {"postId": post_id},
+    }
+    target_queries = []
+
+    def record_sql(_conn, _cursor, statement, _parameters, _context, _executemany):
+        if statement.startswith("SELECT post."):
+            target_queries.append(statement)
+
+    event.listen(db.engine, "before_cursor_execute", record_sql)
+    try:
+        response = client.post(path, json=payload)
+    finally:
+        event.remove(db.engine, "before_cursor_execute", record_sql)
+
+    assert response.status_code == 400
+    assert target_queries == []
+    db.session.expire_all()
+    saved = Vote.query.one()
+    assert (saved.id, saved.post_id, saved.count, saved.is_judge_award, saved.judge_comment) == (
+        vote_id, post.id, 1, True, "Existing award",
+    )
+    assert counts(contest) == (1, 1)
+
+
+@pytest.mark.parametrize("kind", ["vote", "award"])
+def test_post_id_integer_upper_boundary_is_accepted(client, voting, login, kind):
+    contest, voter, post, _, path = voting
+    post.id = 2**31 - 1
+    db.session.commit()
+    login(voter, judge_contests=[contest.id])
+    payload = {"votes": {str(post.id): 1}} if kind == "vote" else {
+        "votes": {}, "judgeAward": {"postId": post.id},
+    }
+
+    assert client.post(path, json=payload).status_code == 200
+    saved = Vote.query.one()
+    assert saved.post_id == post.id
+    assert saved.is_judge_award is (kind == "award")
+    assert counts(contest) == (1, 1)
+
+
 @pytest.mark.parametrize("judge,score,expected", [
     (False, 0, None), (False, 1, 1.0), (False, "1", 1.0), (False, True, 1.0),
     (False, 0.5, None), (False, 2, None), (False, -1, None), (False, None, None),

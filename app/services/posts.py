@@ -110,7 +110,10 @@ def validate_submission(content, files):
 def prepare_update(new_content, kept_images, files):
     if not isinstance(kept_images, list) or any(not isinstance(url, str) for url in kept_images):
         return new_content, (({"error": "Invalid kept images"}), 400)
-    if new_content is not None and not isinstance(new_content, str):
+    # Image-only edits store an empty string because Post.content is NOT NULL.
+    if new_content is None:
+        new_content = ""
+    if not isinstance(new_content, str):
         return new_content, ({"error": "Invalid content"}, 400)
     if any(f and f.filename and not allowed_file(f.filename) for f in files):
         return new_content, ({"error": "Unsupported image extension"}, 400)

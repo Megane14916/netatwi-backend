@@ -11,6 +11,17 @@ from app.runtime_dependencies import calculate_weighted_length, route_logger as 
 from app.models import Contest, Post, Vote, db
 
 
+# Post.id uses PostgreSQL INTEGER (signed 32-bit), including in migrations.
+_MAX_POST_ID = 2**31 - 1
+
+
+def _normalize_post_id(value):
+    post_id = int(value)
+    if not 0 < post_id <= _MAX_POST_ID:
+        raise ValueError("Post ID out of range")
+    return post_id
+
+
 def validate_votes(content, votes_to_submit):
     if content:
         content = content.replace("\r\n", "\n").replace("\r", "\n")
@@ -47,8 +58,8 @@ def submit_votes(
     normalized_votes = {}
     try:
         for pid_str, count_val in votes_to_submit.items():
-            post_id = int(pid_str)
-            if post_id <= 0 or post_id in normalized_votes:
+            post_id = _normalize_post_id(pid_str)
+            if post_id in normalized_votes:
                 raise ValueError
             count = float(count_val)
             if is_judge_voting_now:
@@ -61,11 +72,15 @@ def submit_votes(
         return ({"error": "Invalid vote data"}), 400
 
     award_pid = None
-    if is_judge_voting_now and judge_award:
+    if is_judge_voting_now and judge_award is not None:
         if not isinstance(judge_award, dict):
             return ({"error": "Invalid judge award"}), 400
         award_pid = judge_award.get("postId")
-        if type(award_pid) is not int or award_pid <= 0:
+        if type(award_pid) is not int:
+            return ({"error": "Invalid judge award"}), 400
+        try:
+            award_pid = _normalize_post_id(award_pid)
+        except ValueError:
             return ({"error": "Invalid judge award"}), 400
 
     target_ids = set(normalized_votes)
@@ -109,26 +124,22 @@ def submit_votes(
             processed_post_ids.add(post_id)
 
     # 2. 審査員賞が選択されているが、点数が0点(votesに含まれない/0)の場合のフォロー
-    if is_judge_voting_now and judge_award:
-        award_pid = judge_award.get("postId")
-        if award_pid and award_pid not in processed_post_ids:
-            # 0点で賞だけあげるケース
-            db.session.add(
-                Vote(
-                    user_id=user_id,
-                    post_id=award_pid,
-                    contest_id=id,
-                    count=0,
-                    is_judge_vote=True,
-                    is_judge_award=True,
-                    judge_comment=judge_award.get("comment"),
-                )
+    if award_pid is not None and award_pid not in processed_post_ids:
+        # 0点で賞だけあげるケース
+        db.session.add(
+            Vote(
+                user_id=user_id,
+                post_id=award_pid,
+                contest_id=id,
+                count=0,
+                is_judge_vote=True,
+                is_judge_award=True,
+                judge_comment=judge_award.get("comment"),
             )
+        )
 
     # --- キャッシュスタンピード対策のカウンタ更新用 ---
-    is_now_voter = bool(processed_post_ids) or (
-        is_judge_voting_now and judge_award and judge_award.get("postId")
-    )
+    is_now_voter = bool(processed_post_ids) or award_pid is not None
     is_now_judge_voter = bool(is_now_voter and is_judge_voting_now)
 
     if not was_voter and is_now_voter:

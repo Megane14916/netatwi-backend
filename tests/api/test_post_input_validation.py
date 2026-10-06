@@ -91,3 +91,74 @@ def test_storage_returning_no_image_does_not_create_empty_post(client, contest_f
     response = client.post(f"/api/contests/{contest.id}/posts", data={"images": (BytesIO(b"image"), "image.png")})
     assert response.status_code == 500
     assert Post.query.count() == 0
+
+
+@pytest.mark.parametrize("request_kind", ["json_missing", "json_null", "form_missing"])
+@pytest.mark.parametrize("keep_image", [False, True])
+@pytest.mark.parametrize("rule", ["optional", "required"])
+def test_edit_without_text_accepts_images_and_rejects_empty_post(
+    client, contest_factory, user_factory, login, fixed_time, monkeypatch,
+    request_kind, keep_image, rule
+):
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    contest = contest_factory(now, now + timedelta(hours=1), now + timedelta(hours=2), image_rule=rule)
+    user = user_factory("author")
+    post = Post(contest_id=contest.id, user_id=user.id, content="Original")
+    post.images = ["owned.png"]
+    post.record_image_uploads(post.images)
+    db.session.add(post)
+    db.session.commit()
+    upload, delete = Mock(), Mock()
+    monkeypatch.setattr(app_module, "save_file", upload)
+    monkeypatch.setattr(app_module, "delete_file", delete)
+    login(user)
+    fixed_time(now)
+    kept = post.images if keep_image else []
+    path = f"/api/contests/{contest.id}/posts/{post.id}"
+    if request_kind == "form_missing":
+        response = client.put(path, data={"kept_images": json.dumps(kept)})
+    else:
+        payload = {"kept_images": kept}
+        if request_kind == "json_null":
+            payload["content"] = None
+        response = client.put(path, json=payload)
+
+    assert response.status_code == (200 if keep_image else 400)
+    upload.assert_not_called()
+    delete.assert_not_called()
+    db.session.expire_all()
+    assert post.images == ["owned.png"]
+    assert post.owned_images == ["owned.png"]
+    assert post.content == ("" if keep_image else "Original")
+    if keep_image:
+        assert response.get_json()["content"] == ""
+        assert response.get_json()["images"] == ["owned.png"]
+
+
+@pytest.mark.parametrize("rule", ["optional", "required"])
+def test_edit_without_text_accepts_new_image(
+    client, contest_factory, user_factory, login, fixed_time, monkeypatch, rule
+):
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    contest = contest_factory(now, now + timedelta(hours=1), now + timedelta(hours=2), image_rule=rule)
+    user = user_factory("author")
+    post = Post(contest_id=contest.id, user_id=user.id, content="Original")
+    db.session.add(post)
+    db.session.commit()
+    upload, delete = Mock(return_value="new.png"), Mock()
+    monkeypatch.setattr(app_module, "save_file", upload)
+    monkeypatch.setattr(app_module, "delete_file", delete)
+    login(user)
+    fixed_time(now)
+
+    response = client.put(f"/api/contests/{contest.id}/posts/{post.id}", data={
+        "images": (BytesIO(b"image"), "new.png"),
+    })
+
+    assert response.status_code == 200
+    assert response.get_json()["content"] == ""
+    upload.assert_called_once()
+    delete.assert_not_called()
+    db.session.expire_all()
+    assert post.content == ""
+    assert post.images == post.owned_images == ["new.png"]
