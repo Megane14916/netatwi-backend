@@ -60,6 +60,8 @@ def load_settings(overrides=None):
         "SESSION_COOKIE_HTTPONLY": True,
         "PERMANENT_SESSION_LIFETIME": timedelta(days=31),
         "MAX_CONTENT_LENGTH": 17 * 1024 * 1024,
+        "TASKS_OIDC_AUDIENCE": os.environ.get("TASKS_OIDC_AUDIENCE", ""),
+        "TASKS_SERVICE_ACCOUNT_EMAIL": os.environ.get("TASKS_SERVICE_ACCOUNT_EMAIL", ""),
         **session_cookie_config,
         **overrides,
     }

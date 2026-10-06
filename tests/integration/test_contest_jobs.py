@@ -33,7 +33,7 @@ def make_finished_contest(contest_factory, user):
     ],
 )
 def test_task_processes_each_event_once(
-    client, contest_factory, user_factory, fixed_time, event, notification_type, flag
+    task_client, contest_factory, user_factory, fixed_time, event, notification_type, flag
 ):
     author = user_factory("author")
     recipient = user_factory("recipient")
@@ -41,8 +41,8 @@ def test_task_processes_each_event_once(
     fixed_time(NOW)
     path = f"/api/tasks/contest/{contest.id}/{event}"
 
-    first = client.post(path)
-    repeat = client.post(path)
+    first = task_client.post(path)
+    repeat = task_client.post(path)
 
     assert first.status_code == repeat.status_code == 200
     assert first.get_json() == {"message": f"Processed {event}"}
@@ -62,11 +62,11 @@ def test_task_processes_each_event_once(
         assert ContestResult.query.filter_by(post_id=post.id).one().rank == 1
 
 
-def test_task_waits_for_event_time(client, contest_factory, fixed_time):
+def test_task_waits_for_event_time(task_client, contest_factory, fixed_time):
     contest = contest_factory(NOW + timedelta(minutes=1), NOW + timedelta(hours=1), NOW + timedelta(hours=2))
     fixed_time(NOW)
 
-    response = client.post(f"/api/tasks/contest/{contest.id}/post_start")
+    response = task_client.post(f"/api/tasks/contest/{contest.id}/post_start")
 
     assert response.get_json()["message"].startswith("Task skipped")
     assert db.session.get(Contest, contest.id).notified_post_start is False

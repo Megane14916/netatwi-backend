@@ -250,7 +250,9 @@ def test_schedule_timestamp_url_headers_and_exact_past_boundary(app, fixed_time,
     task = request["task"]
     assert task["http_request"] == {"http_method": 1,
         "url": "https://backend.example/api/tasks/contest/42/post_start",
-        "headers": {"Content-type": "application/json"}}
+        "headers": {"Content-type": "application/json"},
+        "oidc_token": {"service_account_email": "tasks@example.iam.gserviceaccount.com",
+                       "audience": "https://backend.example"}}
     assert task["schedule_time"].ToDatetime(tzinfo=timezone.utc) == expected
 
 

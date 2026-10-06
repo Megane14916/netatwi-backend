@@ -92,13 +92,13 @@ def test_generation_persistence_failure_rolls_back_and_propagates(
 
 @pytest.mark.parametrize("entry_point", ["task", "app.cli"])
 def test_result_commit_failure_prevents_notification_commit(
-    client, runner, finished, monkeypatch, entry_point
+    task_client, runner, finished, monkeypatch, entry_point
 ):
     contest, author, _ = finished
     events = observe_writes(monkeypatch, "commit")
     if entry_point == "task":
         with pytest.raises(RuntimeError, match="commit failed"):
-            client.post(f"/api/tasks/contest/{contest.id}/result_announce")
+            task_client.post(f"/api/tasks/contest/{contest.id}/result_announce")
     else:
         result = runner.invoke(args=["process-contests"])
         assert result.exit_code == 1
