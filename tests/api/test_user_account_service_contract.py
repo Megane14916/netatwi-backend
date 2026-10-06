@@ -130,17 +130,17 @@ def test_directory_failures_propagate_without_rollback(client, monkeypatch, stag
 @pytest.mark.parametrize("setting, name, admin", [(None, "dummy_admin1", True), (None, "dummy_admin2", True),
                                                ("", "dummy_admin1", False), (" , test_admin , ", "test_admin", True),
                                                ("Test_Admin", "test_admin", False)])
-def test_me_uses_session_only_and_original_admin_settings(client, monkeypatch, setting, name, admin):
+def test_me_uses_valid_user_session_and_original_admin_settings(client, monkeypatch, user_factory, setting, name, admin):
+    user = user_factory(name)
     if setting is None:
         monkeypatch.delenv("ADMIN_SCREEN_NAMES", raising=False)
     else:
         monkeypatch.setenv("ADMIN_SCREEN_NAMES", setting)
     with client.session_transaction() as session:
-        session.update(user_id=987654, screen_name=name, name="Session name", profile_image_url="Session image", extra="keep")
-    monkeypatch.setattr(Query, "get", lambda *_args: pytest.fail("me must not query the DB"))
+        session.update(user_id=user.id, screen_name=name, name="Session name", profile_image_url="Session image", extra="keep")
     response = client.get("/api/me")
     assert response.status_code == 200 and response.get_json() == {
-        "logged_in": True, "user": {"id": 987654, "screen_name": name, "name": "Session name", "profile_image_url": "Session image",
+        "logged_in": True, "user": {"id": user.id, "screen_name": name, "name": "Session name", "profile_image_url": "Session image",
                                      "isAdmin": admin}, "judge_contests": []}
     with client.session_transaction() as session:
         assert session["extra"] == "keep"
@@ -148,19 +148,18 @@ def test_me_uses_session_only_and_original_admin_settings(client, monkeypatch, s
 
 @pytest.mark.parametrize("user_id", (None, 0, ""))
 @pytest.mark.parametrize("judges", (None, [12, 3], "raw", {"raw": 1}))
-def test_me_checks_key_presence_and_preserves_judge_value(client, user_id, judges):
+def test_me_clears_invalid_user_id_and_judge_state(client, user_id, judges):
     with client.session_transaction() as session:
         session.update(user_id=user_id, screen_name="member", judge_for_contest_ids=judges)
-    assert client.get("/api/me").get_json() == {
-        "logged_in": True, "user": {"id": user_id, "screen_name": "member", "name": None, "profile_image_url": None,
-                                     "isAdmin": False}, "judge_contests": judges}
+    assert client.get("/api/me").get_json() == {"logged_in": False}
+    with client.session_transaction() as session:
+        assert dict(session) == {}
 
 
-def test_me_missing_screen_name_still_raises(client):
+def test_me_missing_user_is_anonymous_even_without_screen_name(client):
     with client.session_transaction() as session:
         session["user_id"] = 123
-    with pytest.raises(KeyError, match="screen_name"):
-        client.get("/api/me")
+    assert client.get("/api/me").get_json() == {"logged_in": False}
 
 
 @pytest.mark.parametrize("logged_in", (False, True))
@@ -176,8 +175,8 @@ def test_logout_clears_every_session_value_without_db_writes(client, monkeypatch
         assert dict(session) == {}
 
 
-@pytest.mark.parametrize("ident, status", [("missing_key", 401), (None, 404), (0, 404), (987654, 404)])
-def test_withdrawal_missing_user_preserves_session_and_skips_commit(client, monkeypatch, ident, status):
+@pytest.mark.parametrize("ident, status", [("missing_key", 401), (None, 401), (0, 401), (987654, 401)])
+def test_withdrawal_missing_user_invalidates_session_and_skips_commit(client, monkeypatch, ident, status):
     with client.session_transaction() as session:
         session.update(screen_name="member", extra="keep")
         if ident != "missing_key":
@@ -186,7 +185,7 @@ def test_withdrawal_missing_user_preserves_session_and_skips_commit(client, monk
     response = client.delete("/api/users/me")
     assert response.status_code == status and response.get_json() == {"error": "Login required" if status == 401 else "User not found"}
     with client.session_transaction() as session:
-        assert session["extra"] == "keep"
+        assert (session.get("extra") == "keep") if ident == "missing_key" else dict(session) == {}
 
 
 @pytest.mark.parametrize("already_deleted", (False, True))
@@ -222,9 +221,10 @@ def test_withdrawal_updates_timestamp_once_retains_related_data_then_clears_sess
     monkeypatch.setattr(db.session, "commit", commit)
     monkeypatch.setattr(db.session, "rollback", lambda: pytest.fail("No withdrawal rollback"))
     response = client.delete("/api/users/me")
-    assert response.status_code == 200 and response.get_json() == {"message": "退会処理が完了しました"}
-    assert db.session.get(User, ident).deleted_at.replace(tzinfo=timezone.utc) == NOW
-    assert events == ["commit"]
+    assert response.status_code == (401 if already_deleted else 200)
+    assert response.get_json() == ({"error": "Login required"} if already_deleted else {"message": "退会処理が完了しました"})
+    assert db.session.get(User, ident).deleted_at.replace(tzinfo=timezone.utc) == (NOW - timedelta(days=1) if already_deleted else NOW)
+    assert events == ([] if already_deleted else ["commit"])
     assert all(model.query.count() == 1 for model in (Post, Bookmark, Comment, Vote, UserStats, ContestResult, Notification))
     assert contest.post_count == 9 and post.comment_count == 4 and post.bookmark_count == 5
     with client.session_transaction() as session:

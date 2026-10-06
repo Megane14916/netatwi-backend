@@ -45,10 +45,10 @@ def regex_imports(monkeypatch):
 
 
 @pytest.fixture
-def admin(client):
-    # The original authorization checks session values, without looking up a user.
+def admin(client, user_factory):
+    user = user_factory("test_admin")
     with client.session_transaction() as session:
-        session["user_id"] = 12345
+        session["user_id"] = user.id
         session["screen_name"] = "test_admin"
 
 
@@ -145,11 +145,12 @@ def test_duplicate_additions_remain_allowed(client, admin, monkeypatch):
 
 @pytest.mark.parametrize("action", ("list", "add", "delete"))
 @pytest.mark.parametrize("state, status", [("anonymous", 401), ("name_only", 401), ("ordinary", 403),
-                                         ("id_only", 403), ("authorized", 200), ("falsy_id", 200)])
-def test_auth_precedes_json_and_queries_and_uses_key_presence(client, monkeypatch, action, state, status):
+                                         ("id_only", 403), ("authorized", 200), ("falsy_id", 401)])
+def test_auth_precedes_json_and_news_queries_and_requires_active_user(client, monkeypatch, user_factory, action, state, status):
+    user = user_factory("test_admin")
     with client.session_transaction() as session:
         if state not in ("anonymous", "name_only"):
-            session["user_id"] = None if state == "falsy_id" else 12345
+            session["user_id"] = None if state == "falsy_id" else user.id
         if state not in ("anonymous", "id_only"):
             session["screen_name"] = "ordinary" if state == "ordinary" else "test_admin"
     monkeypatch.setenv("ADMIN_SCREEN_NAMES", " , test_admin , ")
@@ -189,13 +190,14 @@ def test_auth_precedes_json_and_queries_and_uses_key_presence(client, monkeypatc
                                                         (None, "dummy_admin2", 200),
                                                         ("", "dummy_admin1", 403),
                                                         ("Test_Admin", "test_admin", 403)])
-def test_default_empty_and_case_sensitive_admin_settings(client, monkeypatch, setting, screen_name, status):
+def test_default_empty_and_case_sensitive_admin_settings(client, monkeypatch, user_factory, setting, screen_name, status):
+    user = user_factory(screen_name)
     if setting is None:
         monkeypatch.delenv("ADMIN_SCREEN_NAMES", raising=False)
     else:
         monkeypatch.setenv("ADMIN_SCREEN_NAMES", setting)
     with client.session_transaction() as session:
-        session["user_id"] = 12345
+        session["user_id"] = user.id
         session["screen_name"] = screen_name
     assert client.get("/api/admin/news").status_code == status
 

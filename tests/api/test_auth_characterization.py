@@ -92,8 +92,8 @@ def observe_transactions(monkeypatch):
     return events
 
 
-def test_oauth_start_preserves_pkce_scope_session_and_logs(client, fake_oauth, caplog):
-    seed_callback_session(client, user_id=123)
+def test_oauth_start_preserves_pkce_scope_session_and_logs(client, fake_oauth, caplog, user_factory):
+    seed_callback_session(client, user_id=user_factory("member").id)
     with caplog.at_level("INFO", logger="app"):
         response = client.get("/api/login/twitter")
     assert response.status_code == 200
