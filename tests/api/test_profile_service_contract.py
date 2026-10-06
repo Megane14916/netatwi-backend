@@ -146,7 +146,7 @@ def test_complete_payload_lists_viewer_information_and_live_awards(client, profi
             {"screen_name": "other", "name": "other", "count": -2.0, "is_judge": False},
         ],
         "awards": ["投稿者賞", "審査員賞"],
-        "myVotes": {"anonymous": None, "target": 1.5, "reader": 0.0, "judge": 9.0, "other": -2.0}[viewer],
+        "myVotes": {"anonymous": None, "target": 1.5, "reader": 0.0, "judge": 9.0, "other": None}[viewer],
     }
     assert payload["posts"][1] == expected_old
     assert payload["bookmarks"][1] == expected_old and payload["likes"][1] == expected_old
@@ -157,7 +157,7 @@ def test_complete_payload_lists_viewer_information_and_live_awards(client, profi
     expected_reads = [("User",), ("Post",), ("Post",), ("Post",),
                       ("post_id", "count", "is_judge_vote", "user_id", "screen_name", "name"),
                       ("post_id", "name")]
-    if viewer != "anonymous":
+    if viewer not in ("anonymous", "other"):
         expected_reads.append(("post_id",))
     assert reads == expected_reads + [("ContestResult",), ("ContestResult",)]
 
@@ -191,7 +191,7 @@ def test_session_truthiness_and_unknown_viewer(client, profile_data, monkeypatch
     response = client.get("/api/profile/target")
     assert response.status_code == 200
     assert all(p["myVotes"] is None and p["isBookmarked"] is False for p in response.get_json()["posts"])
-    assert (("post_id",) in reads) is bool(viewer_id)
+    assert ("post_id",) not in reads
 
 
 @pytest.mark.parametrize("case", ("missing", "deleted", "case_sensitive"))
