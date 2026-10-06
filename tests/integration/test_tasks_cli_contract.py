@@ -67,7 +67,7 @@ def test_task_effect_order_commit_counts_and_reexecution(
     assert response.get_json() == {"message": f"Processed {event}"}
     expected = ["notifications", "commit"]
     if event == "result_announce":
-        expected = ["generate", "results", "commit"] + expected
+        expected = ["generate", "results"] + expected
     assert events == expected
     assert getattr(db.session.get(Contest, contest.id), flag) is True
     # Preserve the current recipient selection, which includes soft-deleted users.
@@ -143,7 +143,7 @@ def test_process_contests_commit_order_and_cleanup_boundary(
     result = runner.invoke(args=["process-contests"])
     assert result.exit_code == 0, result.output
     assert events == [
-        "contest_post_start", "contest_voting_start", "generate", "results", "commit",
+        "contest_post_start", "contest_voting_start", "generate", "results",
         "contest_result_announce", "commit", "commit",
     ]
     assert "Deleted 1 old notifications (older than 30 days)" in result.output
@@ -250,7 +250,7 @@ def test_result_generation_failure_propagates_before_notification_commit(
     fixed_time(NOW)
     events = observe_effects(monkeypatch)
 
-    def fail_generation(_contest_id):
+    def fail_generation(_contest_id, **_kwargs):
         events.append("generate failure")
         raise RuntimeError("generation failed")
 
