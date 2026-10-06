@@ -2,7 +2,8 @@
 
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import joinedload
-from app.models import User, db
+from app.extensions import db
+from app.models import User
 
 
 def get_directory_dependencies():

@@ -13,7 +13,8 @@ from app import create_app
 from app.routes import admin as admin_routes
 from app.routes import contests as public_routes
 from app.services import contests as query_module
-from app.models import Contest, ContestResult, Post, db
+from app.extensions import db
+from app.models import Contest, ContestResult, Post
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)

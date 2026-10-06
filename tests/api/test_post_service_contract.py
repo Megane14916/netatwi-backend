@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import event
 
 import app as app_module
-from app import db
+from app.extensions import db
 from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, Vote
 
 

@@ -8,7 +8,8 @@ from unittest.mock import Mock
 
 import pytest
 import app as app_module
-from app.models import Post, db
+from app.extensions import db
+from app.models import Post
 
 
 @pytest.fixture

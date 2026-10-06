@@ -4,12 +4,14 @@ import sys
 # アプリケーションのルートディレクトリをパスに追加
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from app import app, db
+from app import create_app
+from app.extensions import db
 from app.models import Post, Comment
 
 def sync_comment_counts():
     print("コメント数の同期処理を開始します...")
-    with app.app_context():
+    application = create_app()
+    with application.app_context():
         # 全ての投稿を取得
         posts = Post.query.all()
         updated_count = 0

@@ -11,7 +11,8 @@ from sqlalchemy.orm import Query
 
 from app.routes import posts as routes
 from app.services import contest_posts as query_module
-from app.models import Comment, Post, Vote, db
+from app.extensions import db
+from app.models import Comment, Post, Vote
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)

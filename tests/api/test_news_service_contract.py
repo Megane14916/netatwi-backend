@@ -9,7 +9,8 @@ from sqlalchemy import event
 from sqlalchemy.orm import Query
 
 from app.routes import news as routes
-from app.models import News, db
+from app.extensions import db
+from app.models import News
 
 
 NOW = datetime(2026, 1, 1, 12)

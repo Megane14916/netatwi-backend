@@ -5,7 +5,7 @@ import traceback
 from flask import current_app, jsonify, redirect, request, session
 
 from app.extensions import limiter
-from app.models import db
+from app.extensions import db
 from app.services import auth as auth_service
 from flask import Blueprint
 

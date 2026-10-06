@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 
 from app.services.text import calculate_weighted_length
 from flask import current_app
-from app.models import Contest, Post, Vote, db
+from app.extensions import db
+from app.models import Contest, Post, Vote
 
 
 # Post.id uses PostgreSQL INTEGER (signed 32-bit), including in migrations.

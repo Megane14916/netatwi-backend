@@ -4,7 +4,8 @@
 from flask import current_app, session
 
 from app.integrations import x_oauth
-from app.models import Contest, User, db
+from app.extensions import db
+from app.models import Contest, User
 
 
 

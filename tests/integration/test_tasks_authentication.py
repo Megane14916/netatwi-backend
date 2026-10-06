@@ -5,7 +5,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from unittest.mock import Mock
 from app.integrations import cloud_tasks
-from app.models import Contest, ContestResult, Notification, Post, db
+from app.extensions import db
+from app.models import Contest, ContestResult, Notification, Post
 
 
 @pytest.mark.parametrize("event", ["post_start", "voting_start", "result_announce"])

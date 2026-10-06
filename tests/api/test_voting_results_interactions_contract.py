@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.models import Bookmark, Comment, ContestResult, Notification, Post, UserStats, Vote, db
+from app.extensions import db
+from app.models import Bookmark, Comment, ContestResult, Notification, Post, UserStats, Vote
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)

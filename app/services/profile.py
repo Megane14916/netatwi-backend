@@ -2,7 +2,8 @@
 
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import joinedload
-from app.models import Bookmark, Post, User, Vote, db
+from app.extensions import db
+from app.models import Bookmark, Post, User, Vote
 from app.services import results as results_service
 
 

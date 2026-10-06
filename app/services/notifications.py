@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import joinedload
 
-from app.models import Comment, Notification, db
+from app.extensions import db
+from app.models import Comment, Notification
 
 
 JST = timezone(timedelta(hours=9), "JST")

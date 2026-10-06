@@ -2,7 +2,7 @@
 
 from flask import jsonify, request, session
 
-from app.models import db
+from app.extensions import db
 from app.services import voting as voting_service
 from flask import current_app
 from flask import Blueprint

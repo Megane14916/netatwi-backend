@@ -10,7 +10,8 @@ from sqlalchemy.orm import Query
 from app.routes import profile as routes
 from app.services import profile as query_module
 from app.services import results as results_service
-from app.models import Bookmark, ContestResult, Post, Vote, db
+from app.extensions import db
+from app.models import Bookmark, ContestResult, Post, Vote
 
 
 NOW = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)

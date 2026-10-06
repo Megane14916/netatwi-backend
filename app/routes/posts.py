@@ -5,7 +5,7 @@ from datetime import timedelta, timezone
 
 from flask import jsonify, request, session
 
-from app.models import db
+from app.extensions import db
 from app.services import posts as post_service
 from app.services import contest_posts as contest_post_service
 from flask import Blueprint

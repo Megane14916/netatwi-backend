@@ -69,7 +69,8 @@ def test_route_contract(app):
 
 
 def test_issue_10_handlers_are_registered_from_blueprints(app):
-    from app import app as production_app
+    from app import create_app
+    production_app = create_app({"TESTING": True, "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:"})
 
     groups = {
         "voting": ["voting.submit_votes"],

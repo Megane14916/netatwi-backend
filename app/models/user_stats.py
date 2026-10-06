@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from .base import db
+from app.extensions import db
 
 
 class UserStats(db.Model):

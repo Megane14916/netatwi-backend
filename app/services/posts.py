@@ -13,7 +13,8 @@ from itsdangerous import URLSafeSerializer
 
 from app.integrations import images
 from app.services.text import calculate_weighted_length
-from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, Vote, db
+from app.extensions import db
+from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, Vote
 
 
 def _cleanup_signer():

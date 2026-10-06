@@ -5,7 +5,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy.orm import Query
 
-from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, Vote, db
+from app.extensions import db
+from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, Vote
 
 
 @pytest.mark.parametrize("kind", ["contest", "post"])

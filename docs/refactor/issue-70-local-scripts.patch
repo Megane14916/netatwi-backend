@@ -1,0 +1,41 @@
+--- a/generate_dummy_data.py
++++ b/generate_dummy_data.py
+@@ -3 +3 @@
+-from app import app
++from app import create_app
+@@ -142 +142 @@
+-    with app.app_context():
++    with create_app().app_context():
+--- a/generate_dummy_gp_result.py
++++ b/generate_dummy_gp_result.py
+@@ -3 +3 @@
+-from app import app
++from app import create_app
+@@ -8 +8 @@
+-    with app.app_context():
++    with create_app().app_context():
+--- a/scripts/sync_comment_count.py
++++ b/scripts/sync_comment_count.py
+@@ -7 +7 @@
+-from app import app
++from app import create_app
+@@ -13 +13 @@
+-    with app.app_context():
++    with create_app().app_context():
+--- a/scripts/recalculate_contest_stats.py
++++ b/scripts/recalculate_contest_stats.py
+@@ -9 +9,2 @@
+-from app import app, db
++from app import create_app
++from app.extensions import db
+@@ -14 +15 @@
+-    with app.app_context():
++    with create_app().app_context():
+--- a/calc_result.py
++++ b/calc_result.py
+@@ -1 +1 @@
+-from app import app
++from app import create_app
+@@ -7 +7 @@
+-with app.app_context():
++with create_app().app_context():

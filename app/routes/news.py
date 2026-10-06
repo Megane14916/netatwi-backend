@@ -4,7 +4,7 @@ import os
 
 from flask import jsonify, request, session
 
-from app.models import db
+from app.extensions import db
 from app.services import news as news_service
 from flask import Blueprint
 

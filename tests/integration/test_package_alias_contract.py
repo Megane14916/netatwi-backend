@@ -2,9 +2,10 @@
 
 import ast
 from importlib import import_module
+from app.extensions import db
 from pathlib import Path
 
-import app
+import app as app_module
 from tests.integration.test_package_entry_contract import run_isolated
 
 
@@ -12,16 +13,16 @@ ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "app"
 
 
-def test_package_wins_over_same_named_script_and_handlers_live_in_package():
-    assert Path(app.__file__) == PACKAGE / "__init__.py"
-    assert list(app.__path__) == [str(PACKAGE)]
-    for endpoint, view in app.app.view_functions.items():
+def test_package_wins_over_same_named_script_and_handlers_live_in_package(app):
+    assert Path(app_module.__file__) == PACKAGE / "__init__.py"
+    assert list(app_module.__path__) == [str(PACKAGE)]
+    for endpoint, view in app.view_functions.items():
         if endpoint != "static":
             assert view.__module__.startswith("app.routes.")
-    assert app.create_app.__module__ == "app.factory"
-    assert app.db is import_module("app.extensions").db
-    assert len(app.db.Model.registry.mappers) == 10
-    assert all(m.class_.__module__.startswith("app.models.") for m in app.db.Model.registry.mappers)
+    assert app_module.create_app.__module__ == "app.factory"
+    assert db is import_module("app.extensions").db
+    assert len(db.Model.registry.mappers) == 10
+    assert all(m.class_.__module__.startswith("app.models.") for m in db.Model.registry.mappers)
 
 
 def test_canonical_modules_are_unique_and_all_models_use_one_db():
@@ -32,7 +33,7 @@ def test_canonical_modules_are_unique_and_all_models_use_one_db():
             canonical = import_module(f"app.{new}.{path.stem}")
             assert import_module(f"app.{new}.{path.stem}") is canonical
             assert Path(canonical.__file__) == path
-    assert import_module("app.models.base").db is app.db
+    assert import_module("app.extensions").db is db
 
 
 def test_cloud_tasks_fake_is_connected_to_the_actual_client(app, monkeypatch):
@@ -42,24 +43,17 @@ def test_cloud_tasks_fake_is_connected_to_the_actual_client(app, monkeypatch):
     assert app.extensions["cloud_tasks_client"] is cache
 
 
-def test_cold_direct_entry_publishes_the_same_app_without_second_generation():
+def test_direct_entry_module_import_does_not_generate_an_application():
     run_isolated('''
         import runpy
         from flask import Flask
-        from flask_sqlalchemy import SQLAlchemy
-        from unittest.mock import patch
-        count = []
-        original_init = Flask.__init__
-        def init(self, *args, **kwargs):
-            count.append(self)
-            original_init(self, *args, **kwargs)
-        with patch.object(Flask, "__init__", init), patch.object(Flask, "run"), patch.object(SQLAlchemy, "create_all"):
-            loaded = runpy.run_path("app.py", run_name="__main__")
-            from app import app, create_app, db
-            assert app is loaded["app"]
-            assert create_app is loaded["create_app"]
-            assert db is loaded["db"]
-        assert count == [app]
+        def reject(*args, **kwargs):
+            raise AssertionError("Direct entry import created an app")
+        Flask.__init__ = reject
+        loaded = runpy.run_path("app.py", run_name="direct_import")
+        assert "app" not in loaded
+        import app
+        assert "app" not in vars(app)
     ''')
 
 
@@ -96,7 +90,7 @@ def test_application_and_cli_work_when_legacy_imports_are_forbidden():
     ''')
 
 
-def test_failed_public_resolution_can_retry_without_a_partial_application():
+def test_failed_factory_configuration_can_retry_without_a_partial_application():
     run_isolated('''
         import os
         import app
@@ -106,35 +100,32 @@ def test_failed_public_resolution_can_retry_without_a_partial_application():
         for key in ("SQLALCHEMY_DATABASE_URI", "SECRET_KEY", "FRONTEND_URL"):
             os.environ.pop(key, None)
         try:
-            app.app
+            app.create_app()
         except ValueError as error:
             assert "SQLALCHEMY_DATABASE_URI" in str(error)
         else:
             raise AssertionError("Missing configuration must fail")
         assert "app" not in vars(app)
-        assert "create_app" not in vars(app)
-        os.environ.update({"SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:", "SECRET_KEY": "retry", "FRONTEND_URL": "https://frontend.example"})
-        resolved = app.app
+        assert callable(app.create_app)
+        resolved = app.create_app({"SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:", "SECRET_KEY": "retry", "FRONTEND_URL": "https://frontend.example"})
         assert resolved.config["SECRET_KEY"] == "retry"
         assert len(resolved.view_functions) == 36
-        assert resolved is app.app
+        assert "app" not in vars(app)
     ''')
 
 
-def test_concurrent_factory_export_resolution_creates_one_default_app():
+def test_concurrent_factory_exports_are_pure_and_do_not_create_a_default_app():
     run_isolated('''
         from concurrent.futures import ThreadPoolExecutor
         from flask import Flask
         from unittest.mock import patch
         import app
-        created = []
-        original_init = Flask.__init__
-        def init(self, *args, **kwargs):
-            created.append(self)
-            original_init(self, *args, **kwargs)
-        with patch.object(Flask, "__init__", init), ThreadPoolExecutor(max_workers=8) as pool:
+        def reject(*args, **kwargs):
+            raise AssertionError("Factory export must be cold")
+        with patch.object(Flask, "__init__", reject), ThreadPoolExecutor(max_workers=8) as pool:
             factories = list(pool.map(lambda _: app.create_app, range(8)))
         assert all(factory is factories[0] for factory in factories)
-        assert created == [app.app]
-        assert len(app.app.view_functions) == 36
+        assert "app" not in vars(app)
+        assert not hasattr(app, "_RUNTIME_EXPORTS")
+        assert not hasattr(app, "__getattr__")
     ''')
