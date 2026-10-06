@@ -21,8 +21,8 @@ Git管理外の利用者4本もローカルで移行済み:
 - scripts/recalculate_contest_stats.py
 
 差分は [適用パッチ](issue-67-local-scripts.patch)。他checkoutの同じscriptへは
-`git apply --check docs/refactor/issue-67-local-scripts.patch`で照合してから
-`git apply docs/refactor/issue-67-local-scripts.patch`を実行する。データ更新処理は
+`git apply --unidiff-zero --check docs/refactor/issue-67-local-scripts.patch`で照合してから
+`git apply --unidiff-zero docs/refactor/issue-67-local-scripts.patch`を実行する。データ更新処理は
 実行していない。root appの再公開を使うscriptは#70でfactoryへ移す。
 
 Dockerfile、CI、migrations/env.py、workspace内の現在のbackend入口も調査した。
