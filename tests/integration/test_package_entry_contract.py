@@ -27,9 +27,9 @@ def run_isolated(source, *, environment=None):
 
 
 @pytest.mark.parametrize("module", [
-    "models", "models.user", "services.posts", "services.contests",
-    "integrations.cloud_tasks", "integrations.images", "cli.user_stats",
-    "app_factory", "app_config", "app_extensions", "app_hooks", "runtime_dependencies",
+    "app.models", "app.models.user", "app.services.posts", "app.services.contests",
+    "app.integrations.cloud_tasks", "app.integrations.images", "app.cli.user_stats",
+    "app.factory", "app.config", "app.extensions", "app.hooks", "app.runtime_dependencies",
 ])
 def test_component_import_does_not_create_an_application_or_call_clients(module):
     environment = dict(os.environ)

@@ -1,0 +1,47 @@
+--- a/generate_dummy_data.py
++++ b/generate_dummy_data.py
+@@ -1,7 +1,8 @@
+ import random
+ from datetime import datetime, timedelta, timezone
+ from app import app
+-from models import db, User, Contest, Post, Vote, Comment
++from app.extensions import db
++from app.models import User, Contest, Post, Vote, Comment
+ 
+ def create_users(n=100):
+     users = []
+--- a/generate_dummy_gp_result.py
++++ b/generate_dummy_gp_result.py
+@@ -1,7 +1,8 @@
+ import random
+ from datetime import datetime, timedelta, timezone
+ from app import app
+-from models import db, User, Contest, Post, Vote, Comment, Notification, ContestResult
++from app.extensions import db
++from app.models import User, Contest, Post, Vote, Comment, Notification, ContestResult
+ 
+ def main():
+     with app.app_context():
+--- a/scripts/sync_comment_count.py
++++ b/scripts/sync_comment_count.py
+@@ -5,7 +5,8 @@
+ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ 
+ from app import app
+-from models import db, Post, Comment
++from app.extensions import db
++from app.models import Post, Comment
+ from sqlalchemy import func
+ 
+ def sync_comment_counts():
+--- a/scripts/recalculate_contest_stats.py
++++ b/scripts/recalculate_contest_stats.py
+@@ -7,7 +7,7 @@
+ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+ 
+ from app import app, db
+-from models import Contest, Post, Vote
++from app.models import Contest, Post, Vote
+ from sqlalchemy import func, distinct
+ 
+ def recalculate_stats():
