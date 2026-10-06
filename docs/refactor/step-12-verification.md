@@ -11,12 +11,19 @@
 | #67 旧import alias | [PR #84](https://github.com/Megane14916/netatwi-backend/pull/84)・[記録](issue-67-verification.md) | 全844件＋追加を含む関連23件、CI成功、取り込み後15件 |
 | #68 標準Blueprint | [PR #85](https://github.com/Megane14916/netatwi-backend/pull/85)・[記録](issue-68-verification.md) | 全849件、CI成功、取り込み後11件、35 endpoint接頭辞の照合 |
 | #69 runtime bridge/状態 | [PR #86](https://github.com/Megane14916/netatwi-backend/pull/86)・[記録](issue-69-verification.md) | 修正前の失敗2件、全844件、CI成功、取り込み後40件、業務52関数の照合 |
-| #70 explicit factory | [記録](issue-70-verification.md) | 修正前の失敗2件、全847件、関連44件、53 moduleの非import AST保持 |
+| #70 explicit factory | [PR #87](https://github.com/Megane14916/netatwi-backend/pull/87)・[記録](issue-70-verification.md) | 修正前の失敗2件、全847件、関連44件、CI成功、53 moduleの非import AST保持 |
 
 開始基準は`1de7adf25ec5123bd10cd6327004d250ff96676b`。
 別のgit archive checkoutでも開始時の全844件成功（136.13秒）を確認した。
 各Issueの実装前に最新開発ブランチから分岐し、実装・検証記録を定期的にcommitした。
 各段階でskipを追加せず、特性テストの業務の期待値を保持した。
+
+4件の最終取り込みコードは`d87c29f64bcace40142b21ace8301326d0e0d4c0`。
+取り込み後の全体pytestは847件成功（125.94秒）。開発ブランチの
+[CI](https://github.com/Megane14916/netatwi-backend/actions/runs/37450877167)も成功した。
+リモートmasterは開始時の`5fee097d39888387afaa4d0ae53f6637c30b6375`のまま。
+frontendには変更を行っていない。backendの追跡対象の作業ツリーに未commit差分は残さない。
+4件のIssue本文も実装結果・検証・master保留へ更新済み。
 
 最終847件は開始時844件の固定維持ではない。#67で1件追加、#68で4件追加、
 #69で旧helper互換15件をcanonical6件へ置換して回帰4件追加、#70で3件追加。

@@ -50,7 +50,8 @@ import以外のASTが一致することを53 moduleで確認した。Python 3.11
 全体847件成功（132.67秒）。全10モデル・Alembic差分ゼロ・URL mapも成功。
 追加はcold factory再現2件とpackage自体のcold import1件。既存caseは新入口へ置換。
 管理外scriptを含む7本の構文・canonical入口を照合し、パッチ逆適用のcheckも成功。
-CIは本Issueの個別PRで確認する。
+PR #87のCIは成功し、開発ブランチへマージ済み。取り込み後も全847件成功
+（125.94秒）と開発ブランチCI成功を確認した。masterへはマージしていない。
 #69取り込み後40件と開発ブランチCIは成功した。
 
 やってないこと: 業務処理/HTTP URL/method/応答/DB schema/migration、devへの反映、
