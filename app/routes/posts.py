@@ -90,7 +90,7 @@ def update_post(contest_id, post_id):
         try:
             kept_images = json.loads(kept_images_str)
         except:
-            kept_images = []
+            return jsonify({"error": "Invalid kept images"}), 400
         files = request.files.getlist("images")
 
     new_content, error = post_service.prepare_update(new_content, kept_images, files)

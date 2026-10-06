@@ -11,8 +11,32 @@ from app.runtime_dependencies import (
     calculate_weighted_length,
     delete_file,
     save_file,
+    route_logger as logger,
 )
 from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, Vote, db
+
+
+def _other_image_references(post):
+    references = set()
+    for other in Post.query.filter(Post.id != post.id, Post.image_urls.isnot(None)).all():
+        if isinstance(other.images, list):
+            references.update(url for url in other.images if isinstance(url, str))
+    return references
+
+
+def owned_image_deletions(post, urls):
+    """Only delete proven uploads that no other post still references."""
+    if not urls:
+        return []
+    owned = set(post.owned_images)
+    shared = _other_image_references(post)
+    deletions = []
+    for url in dict.fromkeys(urls):
+        if url in owned and url not in shared:
+            deletions.append(url)
+        else:
+            logger.warning("Image deletion skipped without exclusive upload ownership; post_id=%s; url=%s", post.id, url)
+    return deletions
 
 
 def validate_submission(content, files):
@@ -27,6 +51,8 @@ def validate_submission(content, files):
 
 
 def prepare_update(new_content, kept_images, files):
+    if not isinstance(kept_images, list) or any(not isinstance(url, str) for url in kept_images):
+        return new_content, (({"error": "Invalid kept images"}), 400)
     if new_content:
         new_content = new_content.replace("\r\n", "\n").replace("\r", "\n")
 
@@ -78,6 +104,7 @@ def submit_post(id, user_id, content, files):
     # Post作成 (images setter経由で保存)
     new_post = Post(content=content, contest_id=id, user_id=user_id)
     new_post.images = image_urls  # JSON化して保存される
+    new_post.record_image_uploads(image_urls)
 
     # カウンタのアトミックなインクリメント（レースコンディション対策）
     Contest.query.filter_by(id=id).update({"post_count": Contest.post_count + 1})
@@ -105,9 +132,16 @@ def update_post(contest_id, post_id, user_id, new_content, kept_images, files):
 
     # 1. 既存画像 (old_images) の取得
     old_images = post_to_edit.images or []
+    if (not isinstance(kept_images, list)
+            or any(not isinstance(url, str) for url in kept_images)
+            or len(set(kept_images)) != len(kept_images)
+            or any(url not in old_images for url in kept_images)
+            or (kept_images and set(kept_images) & _other_image_references(post_to_edit))):
+        return ({"error": "Invalid kept images"}), 400
 
     # 2. 新しい画像リスト (final_images) の構築
     final_images = []
+    uploaded_images = []
     # 維持する画像 (kept_images) を追加
     if kept_images:
         final_images.extend(kept_images)
@@ -118,16 +152,17 @@ def update_post(contest_id, post_id, user_id, new_content, kept_images, files):
             if file and allowed_file(file.filename):
                 url = save_file(file)
                 final_images.append(url)
+                uploaded_images.append(url)
 
     # 3. 削除された画像を特定してストレージから削除
     # old_images にはあるが、final_images にはないもの
-    for old_url in old_images:
-        if old_url not in final_images:
-            delete_file(old_url)
+    for old_url in owned_image_deletions(post_to_edit, [url for url in old_images if url not in final_images]):
+        delete_file(old_url)
 
     # 4. DB更新
     post_to_edit.content = new_content
     post_to_edit.images = final_images
+    post_to_edit.record_image_uploads(uploaded_images)
     post_to_edit.updated_at = datetime.now(timezone.utc)
 
     db.session.commit()
@@ -151,7 +186,7 @@ def delete_post(contest_id, post_id, user_id):
         return ({"error": "Outside period"}), 403
 
     if post_to_delete.images:
-        for url in post_to_delete.images:
+        for url in owned_image_deletions(post_to_delete, post_to_delete.images):
             try:
                 delete_file(url)
             except:

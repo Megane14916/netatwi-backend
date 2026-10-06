@@ -26,6 +26,7 @@ def entry(client, user_factory, contest_factory, login, fixed_time):
 def add_post(contest, author, images=()):
     post = Post(contest_id=contest.id, user_id=author.id, content="Original")
     post.images = list(images)
+    post.record_image_uploads(list(images))
     db.session.add(post)
     db.session.commit()
     return post
@@ -129,11 +130,11 @@ def test_update_validation_precedes_ownership_query(client, entry, content, erro
     assert response.get_json() == {"error": error}
 
 
-def test_update_normalizes_text_allows_five_images_and_clears_invalid_kept_json(client, entry, fake_r2):
+def test_update_normalizes_text_and_currently_allows_five_images(client, entry, fake_r2):
     contest, author, path = entry
     post = add_post(contest, author, ["https://r2.example/old.png"])
     response = client.put(f"{path}/{post.id}", data={
-        "content": "a\r\nb\rc", "kept_images": "invalid JSON",
+        "content": "a\r\nb\rc", "kept_images": "[]",
         "images": [(BytesIO(b"x"), f"{i}.png") for i in range(5)],
     })
     assert response.status_code == 200
