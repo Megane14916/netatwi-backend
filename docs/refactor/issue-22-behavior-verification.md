@@ -47,3 +47,9 @@ schema/migrationの変更なし。SQLiteはFOR UPDATEを提供しないため同
 PostgreSQLの標準READ COMMITTEDを前提とし、待機/lock timeoutは例外をrollbackして再試行する。
 スキップ時のロックは呼出元のtransaction終了/context teardownで解放される。
 本番設定変更・外部task操作・デプロイなし。PR単位でrevert可能。
+
+## 最終結果
+
+PR #100は全1009件（ローカル/CI）、取り込み後7件成功。PR #101は全1009件・専用9件skip、PostgreSQL9件成功、取り込み後の結果/Tasks/CLI38件成功。両PRを開発ブランチへmerge済み。
+ユーザー指定に従い開発ブランチでの完了としてIssueをcloseし、masterへのマージは行っていない。
+現在の全体結果は[順13検証記録](step-13-verification.md)を参照する。

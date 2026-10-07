@@ -26,3 +26,9 @@ UTCをreplaceしてJST ISO8601へ変換する既存の日時表現を維持。
 DB schema・採点式/順位/進出条件、無関係なquery最適化、ファイル移動や互換alias復活。
 外部API・フロント変更・migration・本番設定変更・デプロイなし。
 PR単位のrevertで戻せる。masterへマージしない。
+
+## 最終結果
+
+PR #103のdd7b34cで全1024件・専用9件skip、PostgreSQL9件成功。取り込み後の関連92件も成功し、開発ブランチへmerge済み。
+ユーザー指定に従い開発ブランチでの完了としてIssueをcloseし、masterへのマージは行っていない。
+現在の全体結果は[順13検証記録](step-13-verification.md)を参照する。

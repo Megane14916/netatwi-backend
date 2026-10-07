@@ -29,3 +29,9 @@ query順、画像補償、transaction失敗時の行/カウンタと再試行を
 migration/本番設定変更・デプロイなし。必要なフロント更新なし（HTTPエラーのstatusとJSON化）。
 DB確定後のレスポンス/通信障害はcommitを取り消す保証の対象外。
 PR単位のrevertで戻せる。masterへのマージは行わない。
+
+## 最終結果
+
+PR #102の0c7a93cで全1024件・専用9件skip、PostgreSQL9件成功。取り込み後の追加15件も成功し、開発ブランチへmerge済み。
+ユーザー指定に従い開発ブランチでの完了としてIssueをcloseし、masterへのマージは行っていない。
+現在の全体結果は[順13検証記録](step-13-verification.md)を参照する。

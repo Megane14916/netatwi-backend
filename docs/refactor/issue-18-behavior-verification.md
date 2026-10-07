@@ -20,3 +20,9 @@
 やってないこと: 入力検証、transaction/例外/serializer改善、権限仕様変更、schema変更。
 API/DB/外部サービス契約変更なし。frontend調整・migration不要。
 本番反映は行わない。戻す場合は本PRをrevertする。
+
+## 最終結果
+
+PR #92の最終コードc1e4087/9f77a77でローカル・CI全860件成功。開発ブランチへmerge済み。
+ユーザー指定に従い開発ブランチでの完了としてIssueをcloseし、masterへのマージは行っていない。
+現在の全体結果は[順13検証記録](step-13-verification.md)を参照する。
