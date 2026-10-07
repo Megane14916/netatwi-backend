@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import joinedload
 
 from app.services import policies
+from app.services.transactions import rollback_on_failure
 from app.extensions import db
 from app.models import Comment, Notification
 
@@ -121,6 +122,7 @@ def get_unread_notifications_count(user_id):
     return ({"unread_count": count})
 
 
+@rollback_on_failure
 def mark_notifications_read(user_id):
     Notification.query.filter_by(user_id=user_id, is_read=False).update(
         {"is_read": True}

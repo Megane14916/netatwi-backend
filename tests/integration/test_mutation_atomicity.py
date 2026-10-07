@@ -71,3 +71,5 @@ def test_bookmark_recount_failure_does_not_leave_partial_write(client, mutation_
     monkeypatch.setattr(Query, "count", original)
     assert Bookmark.query.count() == before
     assert post.bookmark_count == before
+    assert client.open(f"/api/posts/{post_id}/bookmark", method=method).status_code == 200
+    assert Bookmark.query.count() == post.bookmark_count == int(method == "PUT")

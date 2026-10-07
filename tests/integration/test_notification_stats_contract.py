@@ -100,9 +100,7 @@ def test_notification_creation_failure_keeps_existing_error_boundary(
     if kind == "comment":
         with pytest.raises(RuntimeError, match="notification failure"):
             client.post(f"/api/posts/{post.id}/comments", json={"content": "Comment"})
-        assert events == ["Comment", "notification failure"]
-        # The route itself does not roll back; discard pending fixture writes here.
-        db.session.rollback()
+        assert events == ["Comment", "notification failure", "rollback"]
     else:
         response = client.put(f"/api/posts/{post.id}/like")
         assert response.status_code == 500
@@ -204,8 +202,7 @@ def test_mark_read_commit_failure_propagates_without_route_rollback(
     monkeypatch.setattr(db.session, "commit", fail_commit)
     with pytest.raises(RuntimeError, match="commit failure"):
         client.post("/api/notifications/read")
-    assert events == ["commit failure"]
-    db.session.rollback()
+    assert events == ["commit failure", "rollback"]
     assert db.session.get(Notification, notification_id).is_read is False
 
 
@@ -288,6 +285,5 @@ def test_stats_commit_failure_propagates_without_completion_or_rollback(
     assert isinstance(result.exception, RuntimeError)
     assert str(result.exception) == "commit failure"
     assert result.output == "--- update-user-stats batch started ---\n"
-    assert events == ["UserStats", "commit failure"]
-    db.session.rollback()
+    assert events == ["UserStats", "commit failure", "rollback"]
     assert UserStats.query.count() == 0

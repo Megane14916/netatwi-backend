@@ -3,6 +3,7 @@
 from datetime import timedelta, timezone
 
 from app.services import policies
+from app.services.transactions import rollback_on_failure
 from app.extensions import db
 from app.models import Comment, Post
 from app.services import notifications as notifications_service
@@ -81,6 +82,7 @@ def get_post(post_id):
     return Post.query.get_or_404(post_id)
 
 
+@rollback_on_failure
 def add_comment(post_id, user_id, post, raw_content, judge_contests):
     is_judge = policies.is_judge(post.contest_id, judge_contests)
 
@@ -103,8 +105,10 @@ def add_comment(post_id, user_id, post, raw_content, judge_contests):
     # 結果期間中であれば通知作成
     notifications_service.create_comment_notification(post, post_id, user_id)
 
+    db.session.flush()
+    comment_id = new_comment.id
     db.session.commit()
-    return ({"message": "Comment added successfully", "id": new_comment.id}), 201
+    return ({"message": "Comment added successfully", "id": comment_id}), 201
 
 
 def get_comment_for_modification(comment_id, user_id):
@@ -115,6 +119,7 @@ def get_comment_for_modification(comment_id, user_id):
     return comment, 200
 
 
+@rollback_on_failure
 def delete_comment(comment):
     post_id = comment.post_id
     db.session.delete(comment)
@@ -126,6 +131,7 @@ def delete_comment(comment):
     return ({"message": "Comment deleted"}), 200
 
 
+@rollback_on_failure
 def update_comment(comment, raw_content):
     if not isinstance(raw_content, str) or not raw_content.strip() or (len(raw_content) > 140 and not comment.is_judge):
         return ({"error": "Invalid content length"}), 400

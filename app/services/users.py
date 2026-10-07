@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import joinedload
+from app.services.transactions import rollback_on_failure
 from app.extensions import db
 from app.models import User
 
@@ -66,6 +67,7 @@ def get_users_list(search_query, page, User, UserStats, asc):
     ), 200
 
 
+@rollback_on_failure
 def withdraw_user(user_id):
     user = User.query.get(user_id)
     if not user:

@@ -1,6 +1,8 @@
 """User statistics aggregation service."""
 
+from app.services.transactions import rollback_on_failure
 
+@rollback_on_failure
 def update_user_stats():
     """Update UserStats table by aggregating ContestResult data"""
     from app.extensions import db

@@ -88,7 +88,7 @@ def test_bookmark_recounts_source_rows_and_commits_twice_on_every_request(
         assert response.status_code == 200
         assert response.get_json() == {"message": "ブックマークを更新しました。", "isBookmarked": active,
                                        "bookmarkCount": count}
-        assert events == mutation + ["commit", "count Bookmark", "commit", "refresh Post"]
+        assert events == mutation + ["count Bookmark", "commit"]
         assert post.bookmark_count == count
     assert Notification.query.count() == 0
 
@@ -128,8 +128,8 @@ def test_like_period_and_scoring_boundary(
         assert events == []
     else:
         assert response.get_json() == {"isLiked": method == "PUT", "likeCount": int(method == "PUT")}
-        assert events == (["add Vote", "add Notification", "commit", "count Vote"] if method == "PUT"
-                          else ["commit", "count Vote"])
+        assert events == (["add Vote", "add Notification", "count Vote", "commit"] if method == "PUT"
+                          else ["count Vote", "commit"])
     assert (contest.total_voters, contest.total_judges) == (0, 0)
 
 
@@ -163,11 +163,11 @@ def test_like_create_repeat_delete_recreate_notification_and_count_order(
 
     monkeypatch.setattr(notifications, "create_like_notification", notify)
     for method, active, count, expected in [
-        ("PUT", True, 1, ["add Vote", "notify", "add Notification", "commit", "count Vote"]),
-        ("PUT", True, 1, ["commit", "count Vote"]),
-        ("DELETE", False, 0, ["delete Vote", "commit", "count Vote"]),
-        ("DELETE", False, 0, ["commit", "count Vote"]),
-        ("PUT", True, 1, ["add Vote", "notify", "add Notification", "commit", "count Vote"]),
+        ("PUT", True, 1, ["add Vote", "notify", "add Notification", "count Vote", "commit"]),
+        ("PUT", True, 1, ["count Vote", "commit"]),
+        ("DELETE", False, 0, ["delete Vote", "count Vote", "commit"]),
+        ("DELETE", False, 0, ["count Vote", "commit"]),
+        ("PUT", True, 1, ["add Vote", "notify", "add Notification", "count Vote", "commit"]),
     ]:
         events.clear()
         response = client.open(f"/api/posts/{post.id}/like", method=method)
@@ -203,7 +203,7 @@ def test_existing_votes_and_count_filters(client, interaction_case, user_factory
         assert events == []
     else:
         assert response.get_json() == {"isLiked": method == "PUT", "likeCount": 1}
-        assert events == (["delete Vote"] if method == "DELETE" else []) + ["commit", "count Vote"]
+        assert events == (["delete Vote"] if method == "DELETE" else []) + ["count Vote", "commit"]
     if method == "PUT" or judge:
         assert (vote.count, vote.is_judge_award, vote.judge_comment) == (count, True, "Keep")
     else:
@@ -213,7 +213,7 @@ def test_existing_votes_and_count_filters(client, interaction_case, user_factory
 
 @pytest.mark.parametrize("method", ("PUT", "DELETE"))
 @pytest.mark.parametrize("kind, failure_number", [("bookmark", 1), ("bookmark", 2), ("like", 1)])
-def test_commit_failure_keeps_original_partial_commit_boundary(
+def test_commit_or_count_failure_rolls_back_entire_mutation(
     client, interaction_case, monkeypatch, capsys, method, kind, failure_number
 ):
     post, reader, contest = interaction_case
@@ -223,35 +223,26 @@ def test_commit_failure_keeps_original_partial_commit_boundary(
         db.session.add(model(user_id=reader.id, post_id=post.id, **fields))
         db.session.commit()
     events = observe(monkeypatch)
-    original_commit = db.session.commit
-    calls = 0
-
+    original_count = Query.count
     def fail_commit():
-        nonlocal calls
-        calls += 1
-        if calls == failure_number:
-            events.append("commit failure")
-            raise RuntimeError("commit failure")
-        return original_commit()
-
-    monkeypatch.setattr(db.session, "commit", fail_commit)
+        events.append("commit failure")
+        raise RuntimeError("commit failure")
+    def fail_count(query):
+        events.append("count failure")
+        raise RuntimeError("count failure")
+    if failure_number == 2:
+        monkeypatch.setattr(Query, "count", fail_count)
+    else:
+        monkeypatch.setattr(db.session, "commit", fail_commit)
     response = client.open(f"/api/posts/{post.id}/{kind}", method=method)
     assert response.status_code == 500
     assert response.get_json() == (BOOKMARK_ERROR if kind == "bookmark" else LIKE_ERROR)
-    mutation = [f"{'add' if method == 'PUT' else 'delete'} {model.__name__}"]
-    if kind == "like" and method == "PUT":
-        mutation += ["add Notification"]
-    assert events == mutation + (["commit", "count Bookmark"] if failure_number == 2 else []) + [
-        "commit failure", "rollback"
-    ]
-    assert model.query.count() == (int(method == "PUT") if failure_number == 2 else int(method == "DELETE"))
+    assert events[-2:] == ["count failure" if failure_number == 2 else "commit failure", "rollback"]
+    monkeypatch.setattr(Query, "count", original_count)
+    assert model.query.count() == int(method == "DELETE")
     assert post.bookmark_count == 99
     assert Notification.query.count() == 0
-    output = capsys.readouterr()
-    expected = (f"!!! ERROR at POST /api/posts/{post.id}/bookmark: commit failure"
-                if kind == "bookmark" else "Error toggling like: commit failure")
-    assert expected in output.out
-    assert ("RuntimeError: commit failure" in output.err) == (kind == "bookmark")
+
 
 
 @pytest.mark.parametrize("kind", ("bookmark", "like"))
@@ -279,7 +270,7 @@ def test_json_conversion_failure_is_still_inside_original_try(
     assert response.status_code == 500
     assert response.get_json() == (BOOKMARK_ERROR if kind == "bookmark" else LIKE_ERROR)
     assert events[-2:] == ["json failure", "rollback"]
-    assert events.count("commit") == (2 if kind == "bookmark" else 1)
+    assert events.count("commit") == 1
     assert model.query.count() == int(method == "PUT")
     assert Notification.query.count() == int(kind == "like" and method == "PUT")
 
@@ -338,8 +329,8 @@ def test_real_unique_constraint_race_recovers_existing_row(
     assert response.get_json() == ({"message": "ブックマークを更新しました。", "isBookmarked": True,
                                     "bookmarkCount": 1} if kind == "bookmark" else
                                    {"isLiked": not judge, "likeCount": int(count == 1 and not judge)})
-    assert events == (["add Bookmark", "commit", "rollback", "count Bookmark"] if kind == "bookmark"
-                      else ["add Vote", "add Notification", "commit", "rollback", "count Vote"])
+    assert events == (["add Bookmark", "rollback", "count Bookmark"] if kind == "bookmark"
+                      else ["add Vote", "add Notification", "rollback", "count Vote"])
     assert model.query.count() == 1
     assert post.bookmark_count == 99
     assert Notification.query.count() == 0
@@ -351,11 +342,17 @@ def test_recovery_query_failure_propagates_outside_generic_handler(
 ):
     post, _, _ = interaction_case
     events = observe(monkeypatch)
+    original_count = Query.count
+    failed = False
 
     def fail_commit():
+        nonlocal failed
+        failed = True
         raise IntegrityError("test", {}, RuntimeError("conflict"))
 
-    def fail_count(_query):
+    def fail_count(query):
+        if not failed:
+            return original_count(query)
         events.append("recovery failure")
         raise RuntimeError("recovery failure")
 
@@ -368,8 +365,8 @@ def test_recovery_query_failure_propagates_outside_generic_handler(
 
 
 @pytest.mark.parametrize("method", ("PUT", "DELETE"))
-@pytest.mark.parametrize("kind, stage", [("bookmark", "count"), ("bookmark", "refresh"), ("like", "count")])
-def test_count_or_refresh_failure_preserves_already_committed_state(
+@pytest.mark.parametrize("kind, stage", [("bookmark", "count"), ("bookmark", "flush"), ("like", "count")])
+def test_count_or_flush_failure_rolls_back_entire_mutation(
     client, interaction_case, monkeypatch, kind, stage, method
 ):
     post, reader, contest = interaction_case
@@ -384,18 +381,20 @@ def test_count_or_refresh_failure_preserves_already_committed_state(
         events.append(f"{stage} failure")
         raise RuntimeError(f"{stage} failure")
 
+    original_flush = db.session.flush
     if stage == "count":
         monkeypatch.setattr(Query, "count", fail)
     else:
-        monkeypatch.setattr(db.session, "refresh", fail)
+        monkeypatch.setattr(db.session, "flush", fail)
     response = client.open(f"/api/posts/{post.id}/{kind}", method=method)
     assert response.status_code == 500
     assert response.get_json() == (BOOKMARK_ERROR if kind == "bookmark" else LIKE_ERROR)
     assert events[-2:] == [f"{stage} failure", "rollback"]
-    assert events.count("commit") == (2 if stage == "refresh" else 1)
-    assert len(model.query.all()) == int(method == "PUT")
-    assert len(Notification.query.all()) == int(kind == "like" and method == "PUT")
-    assert post.bookmark_count == (int(method == "PUT") if stage == "refresh" else 99)
+    assert events.count("commit") == 0
+    monkeypatch.setattr(db.session, "flush", original_flush)
+    assert len(model.query.all()) == int(method == "DELETE")
+    assert len(Notification.query.all()) == 0
+    assert post.bookmark_count == 99
 
 
 def test_bookmark_integrity_recovery_missing_post_returns_original_500(
@@ -422,4 +421,4 @@ def test_bookmark_integrity_recovery_missing_post_returns_original_500(
     response = client.put(f"/api/posts/{post_id}/bookmark")
     assert response.status_code == 500
     assert response.get_json() == BOOKMARK_ERROR
-    assert events == ["add Bookmark", "rollback"]
+    assert events == ["add Bookmark", "count Bookmark", "rollback"]
