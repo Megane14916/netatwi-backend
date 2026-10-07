@@ -117,7 +117,7 @@ def test_lazy_imports_precede_input_and_pagination(client, monkeypatch):
 
 
 @pytest.mark.parametrize("stage", ("query", "json"))
-def test_directory_failures_propagate_without_rollback(client, monkeypatch, stage):
+def test_directory_failures_return_json_500_and_rollback(client, monkeypatch, stage):
     from unittest.mock import Mock
     original_rollback = db.session.rollback
     reject_writes(monkeypatch)
@@ -238,7 +238,7 @@ def test_withdrawal_updates_timestamp_once_retains_related_data_then_clears_sess
 
 
 @pytest.mark.parametrize("stage", ("query", "datetime", "commit", "clear", "json"))
-def test_withdrawal_failures_keep_uncaught_exception_and_session_order(client, user_factory, monkeypatch, stage):
+def test_withdrawal_failures_return_json_500_and_keep_session_order(client, user_factory, monkeypatch, stage):
     user = user_factory("member")
     ident = user.id
     events = []

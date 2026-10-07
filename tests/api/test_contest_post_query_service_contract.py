@@ -156,7 +156,7 @@ def test_missing_contest_is_404_and_skips_post_query(client, monkeypatch, capsys
     response = client.get("/api/contests/987654/posts")
     assert response.status_code == 404 and response.get_json() == {"error": "Not Found"}
     assert reads == []
-    assert "!!! ERROR at GET /api/contests/987654/posts: 404 Not Found" in capsys.readouterr().out
+    assert capsys.readouterr().out == ""
 
 
 def test_fractional_vote_and_nullable_comment_are_returned_without_judge_session(client, entries, login):
@@ -215,7 +215,7 @@ def test_clock_logs_and_session_read_order(client, entries, login, monkeypatch, 
 
 
 @pytest.mark.parametrize("stage", ("contest", "Post", "Vote", "Comment", "log", "format", "session", "json"))
-def test_failures_keep_500_print_and_no_rollback(client, entries, login, monkeypatch, capsys, caplog, stage):
+def test_failures_return_500_with_safe_logs_and_rollback(client, entries, login, monkeypatch, capsys, caplog, stage):
     login(entries.reader)
     observe_reads(monkeypatch, allow_rollback=True)
 

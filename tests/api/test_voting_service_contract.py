@@ -352,7 +352,7 @@ def test_text_validation_normalizes_form_and_ignores_json_content(client, app, v
     assert rejected.get_json() == {"error": "Text too long (max 280)"}
 
 
-def test_null_json_and_validation_exception_remain_outside_handler(client, voting, monkeypatch):
+def test_null_json_is_400_and_unexpected_validation_failure_is_500(client, voting, monkeypatch):
     _, _, _, _, path = voting
     invalid = client.post(path, data="null", content_type="application/json")
     assert invalid.status_code == 400

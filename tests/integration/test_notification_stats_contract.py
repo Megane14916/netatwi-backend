@@ -184,7 +184,7 @@ def test_mark_read_commits_once_even_when_no_unread_rows(
     assert Notification.query.filter_by(user_id=other.id, is_read=False).count() == (0 if empty else 1)
 
 
-def test_mark_read_commit_failure_propagates_without_route_rollback(
+def test_mark_read_commit_failure_returns_json_and_rolls_back(
     client, user_factory, login, monkeypatch
 ):
     recipient = user_factory("recipient")

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from flask import current_app
 from unittest.mock import Mock
 from sqlalchemy.orm import Query
 
@@ -294,7 +295,7 @@ def test_each_clock_failure_is_inside_original_exception_handler(client, profile
 
 @pytest.mark.parametrize("stage", ("target", "raw_posts", "bookmarks", "likes", "votes", "awards", "viewer_bookmarks",
                                  "results", "datetime", "filter", "format", "session", "json", "not_found_json", "perf_print"))
-def test_failures_keep_print_traceback_500_and_no_rollback(client, profile_data, login, monkeypatch, capsys, caplog, stage):
+def test_failures_return_500_with_safe_logs_and_rollback(client, profile_data, login, monkeypatch, capsys, caplog, stage):
     login(profile_data.reader)
     observe_reads(monkeypatch, allow_rollback=True)
 

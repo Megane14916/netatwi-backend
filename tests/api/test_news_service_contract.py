@@ -205,7 +205,7 @@ def test_default_empty_and_case_sensitive_admin_settings(client, monkeypatch, us
 
 @pytest.mark.parametrize("path", ("/api/news", "/api/admin/news"))
 @pytest.mark.parametrize("stage", ("query", "format", "json"))
-def test_list_failures_keep_500_print_without_rollback(client, admin, saved_news, monkeypatch, capsys, caplog, path, stage):
+def test_list_failures_return_500_with_safe_logs_and_rollback(client, admin, saved_news, monkeypatch, capsys, caplog, path, stage):
     events = transactions(monkeypatch)
 
     def fail(*_args, **_kwargs):
@@ -318,7 +318,7 @@ def test_addition_returns_captured_id_without_post_commit_refresh(client, admin,
 
 
 @pytest.mark.parametrize("action", ("add", "delete"))
-def test_rollback_failure_propagates_out_of_original_except(client, admin, saved_news, monkeypatch, action):
+def test_rollback_failure_uses_common_500_handler(client, admin, saved_news, monkeypatch, action):
     ident = saved_news.id
     events = []
 

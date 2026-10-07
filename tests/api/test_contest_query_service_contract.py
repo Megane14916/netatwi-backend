@@ -243,7 +243,7 @@ def test_falsy_cache_does_not_read_ttl_clock(client, monkeypatch, cached):
     assert reads == ["Contest"] and len(times) == 1
 
 
-def test_cache_hit_clock_failure_is_outside_exception_handler(client, monkeypatch):
+def test_cache_hit_clock_failure_uses_common_handler(client, monkeypatch):
     query_module.contest_cache()["payload"] = dict(EMPTY)
 
     def fail():
@@ -267,7 +267,7 @@ def test_cache_store_clock_failure_keeps_new_payload_and_old_timestamp(client, m
     assert query_module.contest_cache()["time"] == 123
 
 
-def test_list_json_failure_is_caught_on_miss_and_propagates_on_hit(client, monkeypatch):
+def test_list_json_failure_returns_500_on_miss_and_hit(client, monkeypatch):
     clock(monkeypatch, lambda: 100)
     original_jsonify = public_routes.jsonify
 
@@ -310,7 +310,7 @@ def test_detail_clock_reads_and_log_messages_keep_original_order(client, rich_co
 
 
 @pytest.mark.parametrize("endpoint", ("details", "management"))
-def test_query_failure_keeps_error_response_logs_and_no_rollback(
+def test_query_failure_returns_500_with_safe_logs_and_rollback(
     client, rich_contest, user_factory, login, monkeypatch, capsys, caplog, endpoint
 ):
     login(user_factory("test_admin"))

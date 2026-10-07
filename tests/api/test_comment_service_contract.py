@@ -293,7 +293,7 @@ def test_delete_keeps_existing_negative_counter_behavior(client, comment_case, l
 
 
 @pytest.mark.parametrize("method", ("POST", "PUT", "DELETE"))
-def test_commit_failure_propagates_without_added_rollback(
+def test_commit_failure_returns_json_and_rolls_back(
     client, comment_case, login, fixed_time, monkeypatch, method
 ):
     post, owner, _ = comment_case

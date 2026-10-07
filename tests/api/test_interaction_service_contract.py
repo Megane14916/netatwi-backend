@@ -69,7 +69,7 @@ def test_exact_anonymous_and_missing_post_responses(client, user_factory, login,
     assert events == []
 
 
-def test_bookmark_recounts_source_rows_and_commits_twice_on_every_request(
+def test_bookmark_recounts_source_rows_and_commits_once_on_every_request(
     client, interaction_case, user_factory, monkeypatch
 ):
     post, reader, _ = interaction_case
@@ -337,7 +337,7 @@ def test_real_unique_constraint_race_recovers_existing_row(
 
 
 @pytest.mark.parametrize("kind", ("bookmark", "like"))
-def test_recovery_query_failure_propagates_outside_generic_handler(
+def test_recovery_query_failure_uses_common_500_handler(
     client, interaction_case, monkeypatch, kind
 ):
     post, _, _ = interaction_case
