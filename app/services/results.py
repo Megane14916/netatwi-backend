@@ -6,6 +6,7 @@ from sqlalchemy import case, distinct, func
 from sqlalchemy.orm import joinedload
 
 from app.services import policies
+from app.services.transactions import lock_contest, rollback_on_failure
 from app.extensions import db
 from app.models import Bookmark, Comment, Contest, ContestResult, Post, User, Vote
 
@@ -13,11 +14,12 @@ from app.models import Bookmark, Comment, Contest, ContestResult, Post, User, Vo
 JST = timezone(timedelta(hours=9), "JST")
 
 
+@rollback_on_failure
 def generate_contest_results(contest_id, *, commit=True):
     """
     定期バッチ専用：結果を集計し、ContestResult に保存する。
     """
-    contest = Contest.query.get(contest_id)
+    contest = lock_contest(contest_id)
     if not contest:
         return None
 
@@ -127,15 +129,11 @@ def generate_contest_results(contest_id, *, commit=True):
         )
         results_to_insert.append(cr)
 
-    try:
-        db.session.bulk_save_objects(results_to_insert)
-        if commit:
-            db.session.commit()
-        else:
-            db.session.flush()
-    except Exception:
-        db.session.rollback()
-        raise
+    db.session.bulk_save_objects(results_to_insert)
+    if commit:
+        db.session.commit()
+    else:
+        db.session.flush()
 
 
 def get_cached_contest_results(contest_id):

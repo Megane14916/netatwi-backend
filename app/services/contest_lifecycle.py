@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 
 from app.services import policies
+from app.services.transactions import lock_contest
 from app.integrations import cloud_tasks
 
 from app.extensions import db
@@ -298,7 +299,7 @@ def _rollback_on_failure(operation):
 
 @_rollback_on_failure
 def handle_contest_task(id, event_type):
-    contest = Contest.query.get(id)
+    contest = lock_contest(id)
     if not contest:
         return ({"error": "Contest not found"}), 404
 
@@ -382,10 +383,13 @@ def process_contests():
     """定期実行バッチ: 大会の状態変化を検知して通知送信や結果集計を行う"""
     print("--- process-contests batch started ---")
     now = datetime.now(timezone.utc)
-    contests = Contest.query.all()
+    contests = Contest.query.order_by(Contest.id).all()
     all_users = None
 
     for contest in contests:
+        contest = lock_contest(contest.id)
+        if contest is None:  # A concurrent admin deletion may have won the lock.
+            continue
         changed = False
 
         # 投稿開始
