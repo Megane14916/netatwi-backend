@@ -1,10 +1,11 @@
 """Contest post listing and CRUD routes."""
 
+from app.services.serialization import post_submission
+
 from werkzeug.exceptions import HTTPException
 from app.diagnostics import log_failure
 
 import json
-from datetime import timedelta, timezone
 
 from flask import jsonify, request, session
 
@@ -17,7 +18,6 @@ from flask import Blueprint
 
 
 bp = Blueprint("posts", __name__)
-JST = timezone(timedelta(hours=9), "JST")
 
 
 @bp.route("/api/contests/<int:id>/posts")
@@ -60,17 +60,7 @@ def submit_post(id):
             return jsonify(result), status
         new_post = result
 
-        return jsonify(
-            {
-                "id": new_post.id,
-                "content": new_post.content,
-                "images": new_post.images,
-                "created_at": new_post.created_at.replace(tzinfo=timezone.utc)
-                .astimezone(JST)
-                .isoformat(),
-                "user_id": new_post.user_id,
-            }
-        ), 201
+        return jsonify(post_submission(new_post)), 201
 
     except HTTPException:
         raise
@@ -117,13 +107,7 @@ def update_post(contest_id, post_id):
 
         return jsonify(
             {
-                "id": post_to_edit.id,
-                "content": post_to_edit.content,
-                "images": post_to_edit.images,
-                "created_at": post_to_edit.created_at.replace(tzinfo=timezone.utc)
-                .astimezone(JST)
-                .isoformat(),
-                "user_id": post_to_edit.user_id,
+                **post_submission(post_to_edit),
                 "myVotes": None,
             }
         ), 200

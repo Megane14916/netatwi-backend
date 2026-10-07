@@ -1,6 +1,7 @@
 """Comment queries, validation and mutations with the original write order."""
 
-from datetime import timedelta, timezone
+from app.services.serialization import public_user, jst_iso
+
 
 from app.services import policies
 from app.services.transactions import rollback_on_failure
@@ -9,7 +10,6 @@ from app.models import Comment, Post
 from app.services import notifications as notifications_service
 
 
-JST = timezone(timedelta(hours=9), "JST")
 
 
 def get_comments(post_id):
@@ -27,17 +27,9 @@ def get_comments(post_id):
                 "post_id": c.post_id,
                 "content": c.content,
                 "is_judge": c.is_judge,
-                "created_at": c.created_at.replace(tzinfo=timezone.utc)
-                .astimezone(JST)
-                .isoformat(),
-                "updated_at": c.updated_at.replace(tzinfo=timezone.utc)
-                .astimezone(JST)
-                .isoformat(),
-                "user": {
-                    "name": c.user.name,
-                    "screen_name": c.user.screen_name,
-                    "profile_image_url": c.user.profile_image_url,
-                },
+                "created_at": jst_iso(c.created_at),
+                "updated_at": jst_iso(c.updated_at),
+                "user": public_user(c.user),
             }
             for c in comments
         ]
@@ -62,17 +54,9 @@ def get_multiple_comments(post_ids):
                 "post_id": c.post_id,
                 "content": c.content,
                 "is_judge": c.is_judge,
-                "created_at": c.created_at.replace(tzinfo=timezone.utc)
-                .astimezone(JST)
-                .isoformat(),
-                "updated_at": c.updated_at.replace(tzinfo=timezone.utc)
-                .astimezone(JST)
-                .isoformat(),
-                "user": {
-                    "name": c.user.name,
-                    "screen_name": c.user.screen_name,
-                    "profile_image_url": c.user.profile_image_url,
-                },
+                "created_at": jst_iso(c.created_at),
+                "updated_at": jst_iso(c.updated_at),
+                "user": public_user(c.user),
             }
         )
     return (result)

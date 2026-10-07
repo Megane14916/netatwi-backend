@@ -1,13 +1,14 @@
 """Public and management contest queries with an application-local cache."""
 
-from datetime import datetime, timedelta, timezone
+from app.services.serialization import contest_rules, contest_times
+
+from datetime import datetime, timezone
 
 from flask import current_app
 from app.services import policies
 from app.models import Contest, ContestResult
 
 
-JST = timezone(timedelta(hours=9), "JST")
 
 # Simple cache for get_contests
 def contest_cache():
@@ -58,19 +59,9 @@ def get_contests(time):
             "hasTheme": contest.has_theme,
             "theme": contest.theme,
             "hasQualifier": contest.has_qualifier,
-            "type": contest.type,
-            "scoringMethod": contest.scoring_method,
-            "imageRule": contest.image_rule,
-            "isVotingVisible": contest.is_voting_visible,
-            "advancementNumerator": contest.advancement_numerator,
-            "advancementDenominator": contest.advancement_denominator,
+            **contest_rules(contest),
             "parentContestId": contest.parent_contest_id,
-            "judgeAwardAdvancement": contest.judge_award_advancement,
-            "startTime": st.astimezone(JST).isoformat() if st else None,
-            "endTime": et.astimezone(JST).isoformat() if et else None,
-            "votingEndTime": vt.astimezone(JST).isoformat() if vt else None,
-            "generalVoteWeight": contest.general_vote_weight,
-            "judgeMaxScore": contest.judge_max_score,
+            **contest_times(contest, nullable=True),
             # 追加フィールド
             "totalPosters": total_posters,
             "totalVoters": total_voters,
@@ -137,26 +128,10 @@ def get_contest_details(contest, user_id, start_time, time):
             "id": contest.id,
             "name": contest.name,
             "theme": contest.theme,  # お題 (Noneの場合もある)
-            "startTime": contest.start_time.replace(tzinfo=timezone.utc)
-            .astimezone(JST)
-            .isoformat(),
-            "endTime": contest.end_time.replace(tzinfo=timezone.utc)
-            .astimezone(JST)
-            .isoformat(),
-            "votingEndTime": contest.voting_end_time.replace(tzinfo=timezone.utc)
-            .astimezone(JST)
-            .isoformat(),
-            "generalVoteWeight": contest.general_vote_weight,
-            "judgeMaxScore": contest.judge_max_score,
+            **contest_times(contest),
+            **contest_rules(contest),
             "hasTheme": contest.has_theme,
             "hasQualifier": contest.has_qualifier,
-            "type": contest.type,
-            "scoringMethod": contest.scoring_method,
-            "imageRule": contest.image_rule,
-            "isVotingVisible": contest.is_voting_visible,
-            "advancementNumerator": contest.advancement_numerator,
-            "advancementDenominator": contest.advancement_denominator,
-            "judgeAwardAdvancement": contest.judge_award_advancement,
             "parentContestId": contest.parent_contest_id,
             "isAdvancedToFinal": is_advanced_to_final,
             "resultCommentTop": contest.result_comment_top,
@@ -186,27 +161,9 @@ def get_management_contests():
                 "name": contest.name,
                 "theme": contest.theme if contest.has_theme else None,
                 "hasQualifier": contest.has_qualifier,
-                "startTime": contest.start_time.replace(tzinfo=timezone.utc)
-                .astimezone(JST)
-                .isoformat(),
-                "endTime": contest.end_time.replace(tzinfo=timezone.utc)
-                .astimezone(JST)
-                .isoformat(),
-                "votingEndTime": contest.voting_end_time.replace(
-                    tzinfo=timezone.utc
-                )
-                .astimezone(JST)
-                .isoformat(),
+                **contest_times(contest),
                 "judgePassword": contest.judge_password,  # パスワードも含める
-                "type": contest.type,
-                "scoringMethod": contest.scoring_method,
-                "imageRule": contest.image_rule,
-                "generalVoteWeight": contest.general_vote_weight,
-                "judgeMaxScore": contest.judge_max_score,
-                "isVotingVisible": contest.is_voting_visible,
-                "advancementNumerator": contest.advancement_numerator,
-                "advancementDenominator": contest.advancement_denominator,
-                "judgeAwardAdvancement": contest.judge_award_advancement,
+                **contest_rules(contest),
                 "resultCommentTop": contest.result_comment_top,
                 "resultCommentBottom": contest.result_comment_bottom,
             }
