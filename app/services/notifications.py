@@ -1,6 +1,8 @@
 """Notification creation, listing and read-state services."""
 
-from datetime import datetime, timedelta, timezone
+from app.services.serialization import public_user, jst_iso
+
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import joinedload
 
@@ -10,7 +12,6 @@ from app.extensions import db
 from app.models import Comment, Notification
 
 
-JST = timezone(timedelta(hours=9), "JST")
 
 
 def create_comment_notification(post, post_id, user_id):
@@ -88,14 +89,8 @@ def get_notifications(user_id):
                 "is_read": n.is_read,
                 "post_id": n.post_id,
                 "contest_id": n.contest_id,
-                "created_at": n.created_at.replace(tzinfo=timezone.utc)
-                .astimezone(JST)
-                .isoformat(),
-                "sender": {
-                    "name": n.sender.name,
-                    "screen_name": n.sender.screen_name,
-                    "profile_image_url": n.sender.profile_image_url,
-                }
+                "created_at": jst_iso(n.created_at),
+                "sender": public_user(n.sender)
                 if n.sender
                 else None,
                 "post": {
