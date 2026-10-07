@@ -3,6 +3,7 @@
 from flask import jsonify, request, session
 
 from app.services import comments as comments_service
+from app.services import policies
 from flask import Blueprint
 
 
@@ -29,7 +30,7 @@ def get_multiple_comments():
 
 @bp.route("/api/posts/<int:post_id>/comments", methods=["POST"])
 def add_comment(post_id):
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Unauthorized"}), 401
 
     user_id = session["user_id"]
@@ -46,7 +47,7 @@ def add_comment(post_id):
 
 @bp.route("/api/comments/<int:comment_id>", methods=["PUT", "DELETE"])
 def modify_comment(comment_id):
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Unauthorized"}), 401
 
     user_id = session["user_id"]

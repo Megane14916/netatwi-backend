@@ -1,11 +1,10 @@
 """Public and administrative news routes."""
 
-import os
-
 from flask import jsonify, request, session
 
 from app.extensions import db
 from app.services import news as news_service
+from app.services import policies
 from flask import Blueprint
 
 
@@ -24,16 +23,9 @@ def get_news():
 
 @bp.route("/api/admin/news", methods=["GET"])
 def get_admin_news():
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
-    allowed_admins = [
-        s.strip()
-        for s in os.environ.get(
-            "ADMIN_SCREEN_NAMES", "dummy_admin1,dummy_admin2"
-        ).split(",")
-        if s.strip()
-    ]
-    if session.get("screen_name") not in allowed_admins:
+    if not policies.is_admin(session):
         return jsonify({"error": "Forbidden: Admins only"}), 403
     try:
         payload, status = news_service.get_admin_news()
@@ -45,16 +37,9 @@ def get_admin_news():
 
 @bp.route("/api/admin/news", methods=["POST"])
 def add_news():
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
-    allowed_admins = [
-        s.strip()
-        for s in os.environ.get(
-            "ADMIN_SCREEN_NAMES", "dummy_admin1,dummy_admin2"
-        ).split(",")
-        if s.strip()
-    ]
-    if session.get("screen_name") not in allowed_admins:
+    if not policies.is_admin(session):
         return jsonify({"error": "Forbidden: Admins only"}), 403
     try:
         data = request.json
@@ -69,16 +54,9 @@ def add_news():
 
 @bp.route("/api/admin/news/<int:id>", methods=["DELETE"])
 def delete_news(id):
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
-    allowed_admins = [
-        s.strip()
-        for s in os.environ.get(
-            "ADMIN_SCREEN_NAMES", "dummy_admin1,dummy_admin2"
-        ).split(",")
-        if s.strip()
-    ]
-    if session.get("screen_name") not in allowed_admins:
+    if not policies.is_admin(session):
         return jsonify({"error": "Forbidden: Admins only"}), 403
     try:
         payload, status = news_service.delete_news(id)

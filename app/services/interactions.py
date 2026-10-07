@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 
+from app.services import policies
 from app.extensions import db
 from app.models import Bookmark, Post, Vote
 from app.services import notifications as notifications_service
@@ -56,14 +57,14 @@ def recover_bookmark(post_id):
 def prepare_like(post_id, user_id):
     post = Post.query.get_or_404(post_id)
 
-    if post.user_id == user_id:
+    if policies.is_owner(post, user_id):
         return ({"error": "Cannot like your own post."}), None, 403
 
     c = post.contest
     now = datetime.now(timezone.utc)
 
     # 投票期間中の一般投票は一括APIを使用するため禁止
-    if now < c.voting_end_time.replace(tzinfo=timezone.utc):
+    if not policies.has_reached(now, c.voting_end_time):
         return ({"error": "Voting is ongoing, use the bulk vote API."}), None, 403
 
     # 審査員のみの大会以外は結果発表後のいいねを禁止（スコアと混同するため）

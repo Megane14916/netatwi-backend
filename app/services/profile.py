@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import joinedload
+from app.services import policies
 from app.extensions import db
 from app.models import Bookmark, Post, User, Vote
 from app.services import results as results_service
@@ -68,7 +69,7 @@ def get_user_profile(screen_name, viewer_id, log_step):
     def filter_posts(raw_posts):
         valid = []
         for p in raw_posts:
-            if now >= p.contest.voting_end_time.replace(tzinfo=timezone.utc):
+            if policies.has_reached(now, p.contest.voting_end_time):
                 valid.append(p)
         return valid
 

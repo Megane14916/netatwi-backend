@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import joinedload
 
+from app.services import policies
 from app.extensions import db
 from app.models import Comment, Notification
 
@@ -16,8 +17,8 @@ def create_comment_notification(post, post_id, user_id):
     contest = post.contest
     now = datetime.now(timezone.utc)
     if (
-        now >= contest.voting_end_time.replace(tzinfo=timezone.utc)
-        and user_id != post.user_id
+        policies.has_reached(now, contest.voting_end_time)
+        and not policies.is_owner(post, user_id)
     ):
         notification = Notification(
             user_id=post.user_id,
@@ -31,7 +32,7 @@ def create_comment_notification(post, post_id, user_id):
 
 def create_like_notification(post, post_id, user_id, c):
     # 通知生成
-    if user_id != post.user_id:
+    if not policies.is_owner(post, user_id):
         notification = Notification(
             user_id=post.user_id,
             sender_id=user_id,

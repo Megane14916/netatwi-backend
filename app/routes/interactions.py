@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.services import interactions as interaction_service
+from app.services import policies
 from flask import Blueprint
 
 
@@ -15,7 +16,7 @@ bp = Blueprint("interactions", __name__)
 
 @bp.route("/api/posts/<int:post_id>/bookmark", methods=["PUT", "DELETE"])
 def set_bookmark(post_id):
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "ログインが必要です。"}), 401
     user_id = session["user_id"]
     try:
@@ -43,7 +44,7 @@ def set_bookmark(post_id):
 
 @bp.route("/api/posts/<int:post_id>/like", methods=["PUT", "DELETE"])
 def set_like(post_id):
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
     user_id = session["user_id"]
 

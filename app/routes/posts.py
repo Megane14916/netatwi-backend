@@ -8,6 +8,7 @@ from flask import jsonify, request, session
 from app.extensions import db
 from app.services import posts as post_service
 from app.services import contest_posts as contest_post_service
+from app.services import policies
 from flask import Blueprint
 
 
@@ -33,7 +34,7 @@ def get_posts_for_contest(id):
 
 @bp.route("/api/contests/<int:id>/posts", methods=["POST"])
 def submit_post(id):
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
     user_id = session["user_id"]
 
@@ -72,7 +73,7 @@ def submit_post(id):
 
 @bp.route("/api/contests/<int:contest_id>/posts/<int:post_id>", methods=["PUT"])
 def update_post(contest_id, post_id):
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
     user_id = session["user_id"]
 
@@ -125,7 +126,7 @@ def update_post(contest_id, post_id):
 
 @bp.route("/api/contests/<int:contest_id>/posts/<int:post_id>", methods=["DELETE"])
 def delete_post(contest_id, post_id):
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
     user_id = session["user_id"]
     try:
