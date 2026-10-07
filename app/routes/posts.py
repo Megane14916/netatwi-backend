@@ -9,6 +9,7 @@ from app.extensions import db
 from app.services import posts as post_service
 from app.services import contest_posts as contest_post_service
 from app.services import policies
+from app.services.validation import json_object
 from flask import Blueprint
 
 
@@ -80,8 +81,8 @@ def update_post(contest_id, post_id):
     new_content = None
 
     # JSONとFormDataの判別
-    if request.content_type and request.content_type.startswith("application/json"):
-        data = request.get_json()
+    if request.is_json:
+        data = json_object()
         new_content = data.get("content")
         kept_images = data.get("kept_images", [])
         files = []
@@ -90,7 +91,7 @@ def update_post(contest_id, post_id):
         kept_images_str = request.form.get("kept_images", "[]")
         try:
             kept_images = json.loads(kept_images_str)
-        except:
+        except json.JSONDecodeError:
             return jsonify({"error": "Invalid kept images"}), 400
         files = request.files.getlist("images")
 
