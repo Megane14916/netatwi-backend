@@ -5,6 +5,7 @@ from flask import jsonify, request, session
 from app.extensions import db
 from app.services import news as news_service
 from app.services import policies
+from app.services.validation import json_object
 from flask import Blueprint
 
 
@@ -41,8 +42,8 @@ def add_news():
         return jsonify({"error": "Login required"}), 401
     if not policies.is_admin(session):
         return jsonify({"error": "Forbidden: Admins only"}), 403
+    data = json_object()
     try:
-        data = request.json
         tweet_id = data.get("tweet_id")
         payload, status = news_service.add_news(tweet_id)
         return jsonify(payload), status
