@@ -10,6 +10,7 @@ from app.integrations import cloud_tasks
 from app.services import contest_lifecycle
 from app.services import contests as contest_service
 from app.services import policies
+from app.services.validation import InputError, json_object
 from flask import Blueprint
 
 
@@ -27,10 +28,12 @@ def create_contest():
     if not policies.is_admin(session):
         return jsonify({"error": "Forbidden: Admins only"}), 403
 
-    data = request.get_json()
+    data = json_object()
     try:
         result, status = contest_lifecycle.create_contest(data)
         return jsonify(result), status
+    except InputError as error:
+        return jsonify({"error": str(error)}), 400
     except Exception as e:
         db.session.rollback()
         print(f"!!! ERROR at /api/admin/contests: {e}")
@@ -64,11 +67,13 @@ def update_contest(id):
     if not contest:
         return jsonify({"error": "Contest not found"}), 404
 
-    data = request.get_json()
+    data = json_object()
     try:
         # 更新可能なフィールドの更新
         result, status = contest_lifecycle.update_contest(contest, data)
         return jsonify(result), status
+    except InputError as error:
+        return jsonify({"error": str(error)}), 400
     except Exception as e:
         db.session.rollback()
         print(f"!!! ERROR at PUT /api/admin/contests/{id}: {e}")

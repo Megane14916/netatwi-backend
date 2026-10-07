@@ -14,6 +14,7 @@ from app.integrations import cloud_tasks
 from app.extensions import db
 from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, User, Vote
 from app.services import results as results_service
+from app.services.contest_validation import validate_contest
 
 
 
@@ -23,6 +24,7 @@ def get_contest(id):
 
 
 def create_contest(data):
+    data = validate_contest(data)
     has_qualifier = data.get("hasQualifier", False)
 
     # 通常/決勝の時刻をパース
@@ -187,6 +189,7 @@ def create_contest(data):
 
 
 def update_contest(contest, data):
+    data = validate_contest(data, contest)
     if "name" in data:
         contest.name = data["name"]
     if "theme" in data:
