@@ -84,6 +84,9 @@ def validate_contest(data, contest=None):
             # Historical aliases must enforce the same rules as current values.
             normalized[field] = {"forbidden": "none", "general": "user"}.get(value, value)
 
+    if contest is None and normalized.get("hasQualifier") and len(normalized["name"]) + len(" 予選") > 120:
+        _invalid("name")
+
     times = []
     for field in ("startTime", "endTime", "votingEndTime"):
         value = normalized.get(field)
