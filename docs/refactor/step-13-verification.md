@@ -58,3 +58,15 @@ DB確定後のCloud Tasks予定作成は従来のbest effortであり、DBと外
 [順11](step-11-verification.md)・[順12](step-12-verification.md)の運用記録を引き継ぐ。
 今回、本番設定の照合や切替は実施していない。
 戻す場合は依存する後続PRから順にrevertし、関連/全体テストと運用条件を再確認する。
+
+## レビュー後の修正（2026-10-08）
+
+### ① ブックマークの並行更新
+
+対象Postを変更前にFOR UPDATEでロックし、先行読込の状態も再取得する。
+ブックマーク行の変更・再集計・保存は従来の1 transactionのまま確定する。
+PUT/PUT、PUT/DELETE、DELETE/PUTの並行実行で保存件数と実行の一致を検証する
+PostgreSQLテストを3件追加し、既存の結果生成9件と同じCIジョブで実行する。
+専用DB fixtureはintegration/conftest.pyに集約した。
+ローカルの交流・rollback関連61件成功、PostgreSQL専用12件skip。
+ローカルDocker engineは停止中のため、実DBの行ロック検証はCIで行う。

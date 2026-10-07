@@ -16,6 +16,10 @@ def get_bookmark_post(post_id):
 
 
 def set_bookmark(post_id, user_id, post, is_bookmarked):
+    # Lock before changing child rows so concurrent operations recount only
+    # after the previous operation has committed. Refresh any earlier read.
+    post = (Post.query.filter_by(id=post_id).populate_existing()
+            .with_for_update().first_or_404())
     existing_bookmark = Bookmark.query.filter_by(
         user_id=user_id, post_id=post_id
     ).first()

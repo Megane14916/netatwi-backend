@@ -112,3 +112,13 @@ snapshot・共通fixtureとアプリ本体の保持を確認する。収集比�
 必要なら該当PRの完了commitを別checkoutで検証する。元の基準SHA・実行環境・許可した
 変更は各 `docs/refactor/issue-<番号>-verification.md` に残している。
 現在の配置・全体監査は [#53検証記録](../docs/refactor/issue-53-verification.md) を参照する。
+
+## ブックマークのPostgreSQL並行検証
+
+結果生成9件に加え、ブックマークのPUT/PUT・PUT/DELETE・DELETE/PUTの3件を
+同じ使い捨てDBのCIジョブで実行する。専用fixtureは`tests/integration/conftest.py`。
+通常のSQLite実行ではPostgreSQL専用の計12件をskipする。
+
+```powershell
+python -m pytest -q tests/integration/test_postgres_result_concurrency.py tests/integration/test_postgres_bookmark_concurrency.py
+```
