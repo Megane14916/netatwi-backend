@@ -44,3 +44,9 @@ HTTP: malformed JSON/型不正をJSON 400へ変更。frontendの有効入力は�
 JSON object以外と空/壊れたJSONはJSON 400へ変更。既存投稿本文/画像とストレージに
 副作用がないことを確認。multipartのkept_imagesはJSONDecodeErrorだけを捕捉する。
 既存の画像所有関係・補償・null/本文なしの画像編集条件は保持。
+
+## ニュース入力
+
+追加10件は修正前すべて失敗、JSON object・文字列のtweet_id・保存後80文字上限を検証。
+ID/URLからの既存の抽出規則は保持。入力型/JSON不正は500からJSON 400へ変更し、
+DB更新を伴わない。frontend正常入力・DB schemaと公開日時表現は維持。
