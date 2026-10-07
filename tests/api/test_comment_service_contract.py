@@ -222,7 +222,7 @@ def test_edit_owner_check_precedes_bad_json(client, comment_case, login, user_fa
 @pytest.mark.parametrize("body, exception", [(None, AttributeError), ([], AttributeError),
                                            ({"content": None}, AttributeError),
                                            ({"content": 123}, AttributeError)])
-def test_invalid_json_shapes_keep_existing_exception_boundary(
+def test_invalid_json_shapes_return_400_without_writes(
     client, comment_case, login, monkeypatch, method, body, exception
 ):
     post, owner, _ = comment_case
@@ -235,8 +235,9 @@ def test_invalid_json_shapes_keep_existing_exception_boundary(
     # json=None would omit the JSON body in Flask's test client.
     import json
 
-    with pytest.raises(exception):
-        client.open(path, method=method, data=json.dumps(body), content_type="application/json")
+    response = client.open(path, method=method, data=json.dumps(body), content_type="application/json")
+    assert response.status_code == 400
+    assert "error" in response.get_json()
     assert writes == []
 
 

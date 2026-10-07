@@ -7,6 +7,7 @@ from flask import jsonify, request, session
 
 from app.extensions import db
 from app.models import User
+from app.services.validation import InputError
 
 
 
@@ -54,6 +55,7 @@ def add_cache_control_headers(response):
 
 
 def register_hooks(app):
+    app.register_error_handler(InputError, lambda error: (jsonify({"error": str(error)}), 400))
     app.register_error_handler(413, request_entity_too_large)
     app.before_request(invalidate_stale_user_session)
     app.before_request(log_request_info)

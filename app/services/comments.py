@@ -84,7 +84,7 @@ def get_post(post_id):
 def add_comment(post_id, user_id, post, raw_content, judge_contests):
     is_judge = policies.is_judge(post.contest_id, judge_contests)
 
-    if not raw_content.strip() or (len(raw_content) > 140 and not is_judge):
+    if not isinstance(raw_content, str) or not raw_content.strip() or (len(raw_content) > 140 and not is_judge):
         return ({"error": "Comment must be between 1 and 140 characters"}), 400
     content = raw_content
 
@@ -127,7 +127,7 @@ def delete_comment(comment):
 
 
 def update_comment(comment, raw_content):
-    if not raw_content.strip() or (len(raw_content) > 140 and not comment.is_judge):
+    if not isinstance(raw_content, str) or not raw_content.strip() or (len(raw_content) > 140 and not comment.is_judge):
         return ({"error": "Invalid content length"}), 400
 
     comment.content = raw_content
