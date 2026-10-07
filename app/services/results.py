@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import case, distinct, func
 from sqlalchemy.orm import joinedload
 
+from app.services import policies
 from app.extensions import db
 from app.models import Bookmark, Comment, Contest, ContestResult, Post, User, Vote
 
@@ -158,7 +159,7 @@ def get_cached_contest_results(contest_id):
 def get_contest_results(id, user_id):
     c = Contest.query.get_or_404(id)
     now = datetime.now(timezone.utc)
-    if now < c.voting_end_time.replace(tzinfo=timezone.utc):
+    if not policies.has_reached(now, c.voting_end_time):
         return ({"error": "Voting ongoing"}), 403
 
     all_posts = (

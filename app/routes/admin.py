@@ -9,6 +9,7 @@ from app.extensions import db
 from app.integrations import cloud_tasks
 from app.services import contest_lifecycle
 from app.services import contests as contest_service
+from app.services import policies
 from flask import Blueprint
 
 
@@ -21,16 +22,9 @@ def schedule_contest_task(*args):
 
 @bp.route("/api/admin/contests", methods=["POST"])
 def create_contest():
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
-    allowed_admins = [
-        s.strip()
-        for s in os.environ.get(
-            "ADMIN_SCREEN_NAMES", "dummy_admin1,dummy_admin2"
-        ).split(",")
-        if s.strip()
-    ]
-    if session.get("screen_name") not in allowed_admins:
+    if not policies.is_admin(session):
         return jsonify({"error": "Forbidden: Admins only"}), 403
 
     data = request.get_json()
@@ -46,16 +40,9 @@ def create_contest():
 
 @bp.route("/api/admin/contests/management")
 def get_management_contests():
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
-    allowed_admins = [
-        s.strip()
-        for s in os.environ.get(
-            "ADMIN_SCREEN_NAMES", "dummy_admin1,dummy_admin2"
-        ).split(",")
-        if s.strip()
-    ]
-    if session.get("screen_name") not in allowed_admins:
+    if not policies.is_admin(session):
         return jsonify({"error": "Forbidden: Admins only"}), 403
 
     try:
@@ -68,16 +55,9 @@ def get_management_contests():
 
 @bp.route("/api/admin/contests/<int:id>", methods=["PUT"])
 def update_contest(id):
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
-    allowed_admins = [
-        s.strip()
-        for s in os.environ.get(
-            "ADMIN_SCREEN_NAMES", "dummy_admin1,dummy_admin2"
-        ).split(",")
-        if s.strip()
-    ]
-    if session.get("screen_name") not in allowed_admins:
+    if not policies.is_admin(session):
         return jsonify({"error": "Forbidden: Admins only"}), 403
 
     contest = contest_lifecycle.get_contest(id)
@@ -98,16 +78,9 @@ def update_contest(id):
 
 @bp.route("/api/admin/contests/<int:id>", methods=["DELETE"])
 def delete_contest(id):
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
-    allowed_admins = [
-        s.strip()
-        for s in os.environ.get(
-            "ADMIN_SCREEN_NAMES", "dummy_admin1,dummy_admin2"
-        ).split(",")
-        if s.strip()
-    ]
-    if session.get("screen_name") not in allowed_admins:
+    if not policies.is_admin(session):
         return jsonify({"error": "Forbidden: Admins only"}), 403
 
     try:

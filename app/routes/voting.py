@@ -5,6 +5,7 @@ from flask import jsonify, request, session
 from app.extensions import db
 from app.services import voting as voting_service
 from flask import current_app
+from app.services import policies
 from flask import Blueprint
 
 
@@ -17,7 +18,7 @@ def submit_votes(id):
 
     start_time = time.time()
     current_app.logger.info(f"==> [submit_votes] START for contest {id}")
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
 
     user_id = session["user_id"]
@@ -31,9 +32,9 @@ def submit_votes(id):
         return jsonify(error[0]), error[1]
 
     try:
-        is_judge = id in session.get("judge_for_contest_ids", [])
+        is_judge = policies.is_judge(id, session.get("judge_for_contest_ids", []))
         judge_contest_ids = session.get("judge_for_contest_ids", [])
-        is_judge_voting_now = id in judge_contest_ids
+        is_judge_voting_now = policies.is_judge(id, judge_contest_ids)
 
         result, status = voting_service.submit_votes(
             id, user_id, votes_to_submit, judge_award, is_judge, is_judge_voting_now,

@@ -2,6 +2,7 @@
 
 from datetime import timedelta, timezone
 
+from app.services import policies
 from app.extensions import db
 from app.models import Comment, Post
 from app.services import notifications as notifications_service
@@ -81,7 +82,7 @@ def get_post(post_id):
 
 
 def add_comment(post_id, user_id, post, raw_content, judge_contests):
-    is_judge = post.contest_id in judge_contests
+    is_judge = policies.is_judge(post.contest_id, judge_contests)
 
     if not raw_content.strip() or (len(raw_content) > 140 and not is_judge):
         return ({"error": "Comment must be between 1 and 140 characters"}), 400
@@ -109,7 +110,7 @@ def add_comment(post_id, user_id, post, raw_content, judge_contests):
 def get_comment_for_modification(comment_id, user_id):
     comment = Comment.query.get_or_404(comment_id)
 
-    if comment.user_id != user_id:
+    if not policies.is_owner(comment, user_id):
         return ({"error": "Forbidden"}), 403
     return comment, 200
 

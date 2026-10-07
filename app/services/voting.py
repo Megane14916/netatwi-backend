@@ -7,6 +7,7 @@ and retains HTTP responses and the exception/rollback boundary.
 import time
 from datetime import datetime, timezone
 
+from app.services import policies
 from app.services.text import calculate_weighted_length
 from flask import current_app
 from app.extensions import db
@@ -48,11 +49,7 @@ def submit_votes(
     t1 = time.time()
     current_app.logger.info(f"==> [submit_votes] get_or_404 took: {t1 - t0:.4f}s")
     now = datetime.now(timezone.utc)
-    if not (
-        c.end_time.replace(tzinfo=timezone.utc)
-        <= now
-        < c.voting_end_time.replace(tzinfo=timezone.utc)
-    ):
+    if not policies.in_period(now, c.end_time, c.voting_end_time):
         return ({"error": "Outside period"}), 403
 
     # Validate every target and score before replacing any existing rows.

@@ -7,6 +7,7 @@ from flask import current_app, jsonify, redirect, request, session
 from app.extensions import limiter
 from app.extensions import db
 from app.services import auth as auth_service
+from app.services import policies
 from flask import Blueprint
 
 
@@ -52,7 +53,7 @@ def twitter_callback():
 @bp.route("/api/contests/<int:id>/judge/login", methods=["POST"])
 @limiter.limit("5 per minute")
 def judge_login(id):
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "ログインが必要です。"}), 401
 
     data = request.get_json()

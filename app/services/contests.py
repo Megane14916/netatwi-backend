@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta, timezone
 
 from flask import current_app
+from app.services import policies
 from app.models import Contest, ContestResult
 
 
@@ -76,13 +77,13 @@ def get_contests(time):
             "totalJudges": total_judges,
         }
 
-        if st and et and st <= now < et:
+        if st and et and policies.in_period(now, st, et):
             ongoing.append(c_data)
-        elif et and vt and et <= now < vt:
+        elif et and vt and policies.in_period(now, et, vt):
             voting.append(c_data)
         elif st and now < st:
             upcoming.append(c_data)
-        elif vt and now >= vt:
+        elif vt and policies.has_reached(now, vt):
             closed_list.append(contest)
             closed_data.append(c_data)
 

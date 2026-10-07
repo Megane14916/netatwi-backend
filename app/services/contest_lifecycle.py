@@ -8,6 +8,7 @@ Tasks integration using the active application configuration.
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
+from app.services import policies
 from app.integrations import cloud_tasks
 
 from app.extensions import db
@@ -304,7 +305,7 @@ def handle_contest_task(id, event_type):
     if event_type == "post_start":
         if (
             contest.start_time
-            and now >= contest.start_time.replace(tzinfo=timezone.utc)
+            and policies.has_reached(now, contest.start_time)
             and not contest.notified_post_start
         ):
             print(f"[{contest.id}] Post start notification (Cloud Tasks)")
@@ -324,7 +325,7 @@ def handle_contest_task(id, event_type):
     elif event_type == "voting_start":
         if (
             contest.end_time
-            and now >= contest.end_time.replace(tzinfo=timezone.utc)
+            and policies.has_reached(now, contest.end_time)
             and not contest.notified_voting_start
         ):
             print(f"[{contest.id}] Voting start notification (Cloud Tasks)")
@@ -344,7 +345,7 @@ def handle_contest_task(id, event_type):
     elif event_type == "result_announce":
         if (
             contest.voting_end_time
-            and now >= contest.voting_end_time.replace(tzinfo=timezone.utc)
+            and policies.has_reached(now, contest.voting_end_time)
             and not contest.notified_result_announce
         ):
             print(
@@ -387,7 +388,7 @@ def process_contests():
         # 投稿開始
         if (
             contest.start_time
-            and contest.start_time.replace(tzinfo=timezone.utc) <= now
+            and policies.has_reached(now, contest.start_time)
             and not contest.notified_post_start
         ):
             print(f"[{contest.id}] Post start notification")
@@ -405,7 +406,7 @@ def process_contests():
         # 投票開始
         if (
             contest.end_time
-            and contest.end_time.replace(tzinfo=timezone.utc) <= now
+            and policies.has_reached(now, contest.end_time)
             and not contest.notified_voting_start
         ):
             print(f"[{contest.id}] Voting start notification")
@@ -423,7 +424,7 @@ def process_contests():
         # 結果発表
         if (
             contest.voting_end_time
-            and contest.voting_end_time.replace(tzinfo=timezone.utc) <= now
+            and policies.has_reached(now, contest.voting_end_time)
             and not contest.notified_result_announce
         ):
             print(f"[{contest.id}] Result announce notification & calculation")

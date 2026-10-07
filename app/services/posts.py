@@ -11,6 +11,7 @@ import json
 from flask import current_app
 from itsdangerous import URLSafeSerializer
 
+from app.services import policies
 from app.integrations import images
 from app.services.text import calculate_weighted_length
 from app.extensions import db
@@ -144,11 +145,7 @@ def _upload_images(files, urls):
 def submit_post(id, user_id, content, files):
     c = Contest.query.get_or_404(id)
     now = datetime.now(timezone.utc)
-    if not (
-        c.start_time.replace(tzinfo=timezone.utc)
-        <= now
-        < c.end_time.replace(tzinfo=timezone.utc)
-    ):
+    if not policies.in_period(now, c.start_time, c.end_time):
         return ({"error": "Outside period"}), 403
 
     # 画像必須のバリデーション
@@ -192,11 +189,7 @@ def update_post(contest_id, post_id, user_id, new_content, kept_images, files):
         return ({"error": "Not found"}), 404
     c = Contest.query.get(contest_id)
     now = datetime.now(timezone.utc)
-    if not (
-        c.start_time.replace(tzinfo=timezone.utc)
-        <= now
-        < c.end_time.replace(tzinfo=timezone.utc)
-    ):
+    if not policies.in_period(now, c.start_time, c.end_time):
         return ({"error": "Outside period"}), 403
 
     # 1. 既存画像 (old_images) の取得
@@ -235,11 +228,7 @@ def delete_post(contest_id, post_id, user_id):
 
     c = Contest.query.get(contest_id)
     now = datetime.now(timezone.utc)
-    if not (
-        c.start_time.replace(tzinfo=timezone.utc)
-        <= now
-        < c.end_time.replace(tzinfo=timezone.utc)
-    ):
+    if not policies.in_period(now, c.start_time, c.end_time):
         return ({"error": "Outside period"}), 403
 
     deletions = owned_image_deletions(post_to_delete, post_to_delete.images)
