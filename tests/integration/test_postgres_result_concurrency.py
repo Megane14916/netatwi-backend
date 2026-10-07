@@ -33,8 +33,13 @@ def postgres_app():
             db.engine.dispose()
 
 
-@pytest.mark.parametrize("entry, empty", [("results", False), ("task", False), ("cli", False), ("task", True), ("cli", True)])
-def test_result_and_notification_generation_is_serialized(postgres_app, fixed_time, entry, empty):
+@pytest.mark.parametrize("entry, other, empty", [
+    ("results", "results", False), ("task", "task", False), ("cli", "cli", False),
+    ("task", "task", True), ("cli", "cli", True),
+    ("task", "cli", False), ("cli", "task", False),
+    ("task", "cli", True), ("cli", "task", True),
+])
+def test_result_and_notification_generation_is_serialized(postgres_app, fixed_time, entry, other, empty):
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     fixed_time(now)
     author = User(twitter_id="pg-author", screen_name="pg_author", name="Author")
@@ -52,10 +57,10 @@ def test_result_and_notification_generation_is_serialized(postgres_app, fixed_ti
     started = Event()
     backend = []
 
-    def invoke():
-        if entry == "results":
+    def invoke(operation):
+        if operation == "results":
             results.generate_contest_results(contest_id)
-        elif entry == "task":
+        elif operation == "task":
             contest_lifecycle.handle_contest_task(contest_id, "result_announce")
         else:
             contest_lifecycle.process_contests()
@@ -64,7 +69,7 @@ def test_result_and_notification_generation_is_serialized(postgres_app, fixed_ti
         with postgres_app.app_context():
             backend.append(db.session.execute(text("select pg_backend_pid()")).scalar_one())
             started.set()
-            invoke()
+            invoke(other)
 
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(worker)
@@ -79,7 +84,7 @@ def test_result_and_notification_generation_is_serialized(postgres_app, fixed_ti
                         break
                     time.sleep(0.02)
             assert waiting, "The second worker must overlap while the first holds the row lock"
-            invoke()
+            invoke(entry)
         finally:
             db.session.rollback()  # Release the lock even when an assertion fails.
         future.result(timeout=10)

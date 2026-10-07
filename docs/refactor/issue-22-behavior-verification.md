@@ -25,3 +25,25 @@ Python 3.11.16、隔離SQLite、外部通信拒否/fakeで検証。結果はPR�
 migration/本番設定変更なし。本番反映なし。PR単位のrevertで戻せる。
 
 一般mutation関連246件成功。全体CIの結果はPRに記録する。
+
+## 結果処理の同時実行
+
+一般mutationのPR #100は全体1009件（ローカル/CI）、マージ後7件成功。
+並行処理の基準はそのmerge `f4e1ce2`。再現テストだけの`16f3a5b`を
+[CI run 37609955001](https://github.com/Megane14916/netatwi-backend/actions/runs/37609955001)
+で実行し、PostgreSQLの5件すべてで結果行または通知が2件になる失敗を確認した。
+
+大会行をSELECT FOR UPDATEで取得し、待機後にORMの既存オブジェクトを再読込する。
+結果存在判定とTasks/CLIの通知フラグ判定の前に同じロックを取り、結果・通知・フラグは
+従来の1 transactionで確定する。CLIはID順に処理してロック順を揃える。
+結果serviceの取得/集計失敗もrollbackする。採点式・順位・空大会の正常契約は保持。
+
+PostgreSQL専用テストは本番URIを受け付けず、CI service containerの固定URIだけを許可。
+実際のlock待ちをpg_stat_activityで確認し、TasksとCLIの混在も追加した計9件を検証する。
+通常のSQLiteジョブでは9件をskipし、PostgreSQLジョブで実行する。ローカルはDocker
+engineが起動していないため、SQLite関連60件成功とCIの実DB検証を組み合わせる。
+
+schema/migrationの変更なし。SQLiteはFOR UPDATEを提供しないため同時実行保証の対象外。
+PostgreSQLの標準READ COMMITTEDを前提とし、待機/lock timeoutは例外をrollbackして再試行する。
+スキップ時のロックは呼出元のtransaction終了/context teardownで解放される。
+本番設定変更・外部task操作・デプロイなし。PR単位でrevert可能。
