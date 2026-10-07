@@ -50,3 +50,10 @@ JSON object以外と空/壊れたJSONはJSON 400へ変更。既存投稿本文/�
 追加10件は修正前すべて失敗、JSON object・文字列のtweet_id・保存後80文字上限を検証。
 ID/URLからの既存の抽出規則は保持。入力型/JSON不正は500からJSON 400へ変更し、
 DB更新を伴わない。frontend正常入力・DB schemaと公開日時表現は維持。
+
+## 審査員ログイン入力
+
+追加10件は修正前8失敗/2成功、修正後認証・外部境界関連43件成功。
+JSON object、文字列パスワード、DB上限120文字を検証し、不正入力はJSON 400。
+認証失敗・一般投票大会・rate limit・既存の審査員sessionを維持する。
+OAuthの機密ログ対策とTasks OIDCは変更していない。
