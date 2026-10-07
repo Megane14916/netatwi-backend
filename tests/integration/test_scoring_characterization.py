@@ -26,7 +26,7 @@ def add_post(contest, user, position):
 
 @pytest.mark.parametrize(
     ("scoring_method", "expected_score"),
-    [("user", 1.0), ("judge", 3.0), ("both", 53.0)],
+    [("user", 1.0), ("judge", 3.0), ("both", 53.0), ("general", 53.0)],
 )
 def test_scoring_method_selects_persisted_score(
     app, contest_factory, user_factory, scoring_method, expected_score

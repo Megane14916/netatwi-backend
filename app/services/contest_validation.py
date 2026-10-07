@@ -81,8 +81,8 @@ def validate_contest(data, contest=None):
             }[base]
             if not isinstance(value, str) or value not in allowed:
                 _invalid(field)
-            # Historical aliases must enforce the same rules as current values.
-            normalized[field] = {"forbidden": "none", "general": "user"}.get(value, value)
+            # The legacy general label used combined judge and user scoring.
+            normalized[field] = {"forbidden": "none", "general": "both"}.get(value, value)
 
     if contest is None and normalized.get("hasQualifier") and len(normalized["name"]) + len(" 予選") > 120:
         _invalid("name")

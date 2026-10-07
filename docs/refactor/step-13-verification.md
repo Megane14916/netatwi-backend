@@ -19,7 +19,7 @@
 
 入力不正はDB/外部処理の前に400へ変更。HTTPExceptionの404等を500として
 握りつぶさず、大会詳細のDB障害は404から500へ変更した。大会入力のenum表記揺れ
-（general→user、forbidden→none）と時差付き日時のUTC正規化も#21の意図した変更である。
+（general→both、forbidden→none）と時差付き日時のUTC正規化も#21の意図した変更である。
 レスポンスのキー/型・採点式・順位・
 進出条件・権限・期間・DB schema・外部サービス契約は保持した。
 順11の画像所有/補償・退会session・OAuth機密ログ・Tasks OIDCも回帰テストで確認した。
@@ -70,3 +70,11 @@ PostgreSQLテストを3件追加し、既存の結果生成9件と同じCIジョ
 専用DB fixtureはintegration/conftest.pyに集約した。
 ローカルの交流・rollback関連61件成功、PostgreSQL専用12件skip。
 ローカルDocker engineは停止中のため、実DBの行ロック検証はCIで行う。
+
+### ③ generalの採点方式
+
+ユーザー指定によりgeneralはbothへ正規化し、元の審査員点＋一般票を保持する。
+通常大会・予選作成と既存general大会更新の再現3件は修正前失敗、修正後成功。
+審査員2点・一般票1票・重み50の結果52点を実際の結果保存まで検証した。
+既存DBのgeneralも集計時は従来どおり両方の点を使う（migration不要）。
+管理入力・大会更新・採点・結果関連116件成功。

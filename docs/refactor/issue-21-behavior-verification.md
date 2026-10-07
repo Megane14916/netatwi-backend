@@ -24,7 +24,8 @@ create/updateの全フィールドを更新前に検証。name/passwordのDB上�
 整数の型/32bit範囲・非負の重み・正の最大点/分母、enum、文字列/null、期間順序と
 部分更新後の期間・進出率を確認する。数値文字列は従来どおり許容する。
 日時はUTCへ正規化して保存し、オフセット消失を修正する。naive入力は従来どおりUTC。
-旧enum general/forbiddenはuser/noneへ正規化し、一般票・画像禁止の条件を適用する。
+旧enum general/forbiddenはboth/noneへ正規化し、審査員点＋一般票・画像禁止の条件を適用する。
+2026-10-08のユーザー指示でgeneralの正規化先をuserからbothへ修正した。
 不正JSONと検証失敗はJSON 400へ変更し、DB・Cloud Tasksに副作用を出さない。
 frontendはISO日時、number/booleanと有効enumを送るため正常系の調整不要。
 既存の不正値/ゼロ分母/forbiddenの特性テストは意図した契約のみ更新した。
