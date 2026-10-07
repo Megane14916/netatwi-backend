@@ -8,6 +8,7 @@ from app.extensions import limiter
 from app.extensions import db
 from app.services import auth as auth_service
 from app.services import policies
+from app.services.validation import json_object
 from flask import Blueprint
 
 
@@ -56,11 +57,13 @@ def judge_login(id):
     if not policies.is_authenticated(session):
         return jsonify({"error": "ログインが必要です。"}), 401
 
-    data = request.get_json()
+    data = json_object()
     password = data.get("password")
 
     if not password:
         return jsonify({"error": "パスワードを入力してください。"}), 400
+    if not isinstance(password, str) or len(password) > 120:
+        return jsonify({"error": "パスワードは120文字以内の文字列で入力してください。"}), 400
 
     try:
         result = auth_service.authenticate_judge(id, password)

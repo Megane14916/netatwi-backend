@@ -302,10 +302,11 @@ def test_judge_success_is_idempotent_and_missing_contest_stays_500(
     assert events == []
 
 
-def test_judge_null_json_keeps_exception_outside_handler(client, user_factory, login):
+def test_judge_null_json_is_400(client, user_factory, login):
     login(user_factory("judge"))
-    with pytest.raises(AttributeError):
-        client.post("/api/contests/1/judge/login", data="null", content_type="application/json")
+    response = client.post("/api/contests/1/judge/login", data="null", content_type="application/json")
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Expected a JSON object"}
 
 
 def test_judge_rate_limit_remains_five_per_minute(
