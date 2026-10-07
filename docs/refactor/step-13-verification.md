@@ -65,7 +65,7 @@ DB確定後のCloud Tasks予定作成は従来のbest effortであり、DBと外
 
 対象Postを変更前にFOR UPDATEでロックし、先行読込の状態も再取得する。
 ブックマーク行の変更・再集計・保存は従来の1 transactionのまま確定する。
-PUT/PUT、PUT/DELETE、DELETE/PUTの並行実行で保存件数と実行の一致を検証する
+PUT/PUT、PUT/DELETE、DELETE/PUTの並行実行で保存件数と実件数の一致を検証する
 PostgreSQLテストを3件追加し、既存の結果生成9件と同じCIジョブで実行する。
 専用DB fixtureはintegration/conftest.pyに集約した。
 ローカルの交流・rollback関連61件成功、PostgreSQL専用12件skip。
@@ -78,3 +78,10 @@ PostgreSQLテストを3件追加し、既存の結果生成9件と同じCIジョ
 審査員2点・一般票1票・重み50の結果52点を実際の結果保存まで検証した。
 既存DBのgeneralも集計時は従来どおり両方の点を使う（migration不要）。
 管理入力・大会更新・採点・結果関連116件成功。
+
+### ⑨ 未使用の予選設定
+
+予選なしの作成（hasQualifier省略/false）と単一大会更新では、使わない
+qualifier項目と期間を検証しない。予選ペア作成では検証を維持し、更新で使用する
+qualifierJudgeAwardAdvancementの互換入力もbooleanとして検証する。
+追加50件は修正前34失敗/16成功、修正後の管理入力・大会関連140件成功。

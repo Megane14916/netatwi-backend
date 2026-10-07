@@ -51,7 +51,13 @@ def validate_contest(data, contest=None):
         for field in ("name", "startTime", "endTime", "votingEndTime"):
             if field not in data:
                 _invalid(field)
+    create_qualifier = contest is None and data.get("hasQualifier") is True
     for field, value in data.items():
+        # Qualifier settings are consumed only when creating a qualifier pair.
+        # Updating a single contest uses only the historical award alias.
+        if (field.startswith("qualifier") and not create_qualifier
+                and not (contest is not None and field == "qualifierJudgeAwardAdvancement")):
+            continue
         base = field[9:10].lower() + field[10:] if field.startswith("qualifier") else field
         if base in {"hasTheme", "hasQualifier", "isVotingVisible", "judgeAwardAdvancement"}:
             if type(value) is not bool:
@@ -95,7 +101,7 @@ def validate_contest(data, contest=None):
         times = [value.replace(tzinfo=timezone.utc) for value in times]
         if not times[0] < times[1] < times[2]:
             _invalid("period")
-    if normalized.get("hasQualifier"):
+    if create_qualifier:
         qt = [_date(normalized.get("qualifier" + field) or times[index].isoformat(), "qualifier" + field)
               for index, field in enumerate(("StartTime", "EndTime", "VotingEndTime"))]
         if not qt[0] < qt[1] < qt[2]:

@@ -20,7 +20,7 @@ migration・本番設定変更なし。本番反映なし。PR単位のrevertで
 ## 大会管理API
 
 基準`dbeff1c`。追加68件は修正前67失敗/1成功、修正後の管理/認証関連114件成功。
-create/updateの全フィールドを更新前に検証。name/passwordのDB上限、真偽値の型、
+create/updateで使用するフィールドを更新前に検証。name/passwordのDB上限、真偽値の型、
 整数の型/32bit範囲・非負の重み・正の最大点/分母、enum、文字列/null、期間順序と
 部分更新後の期間・進出率を確認する。数値文字列は従来どおり許容する。
 日時はUTCへ正規化して保存し、オフセット消失を修正する。naive入力は従来どおりUTC。
@@ -72,3 +72,7 @@ SQLiteでも受理前検証を確認し、PostgreSQL VARCHARへの依存を回�
 PR #93〜#99を開発ブランチへ順にmerge。最後のPR #99で全1002件のCI成功を確認した。
 ユーザー指定に従い開発ブランチでの完了としてIssueをcloseし、masterへのマージは行っていない。
 現在の全体結果は[順13検証記録](step-13-verification.md)を参照する。
+
+2026-10-08のレビュー修正: 予選専用項目は予選ペア作成時のみ検証する。
+予選なしの作成や単一大会の更新では未使用項目を無視する。更新時に使われる
+qualifierJudgeAwardAdvancementのboolean検証は維持する。

@@ -33,7 +33,6 @@ def admin_case(user_factory, login, contest_factory, monkeypatch):
     {"endTime": BASE["startTime"]}, {"votingEndTime": BASE["endTime"]},
     {"type": "invalid"}, {"scoringMethod": []}, {"imageRule": "invalid"},
     {"advancementDenominator": 0}, {"advancementNumerator": 3, "advancementDenominator": 2},
-    {"qualifierJudgeMaxScore": []}, {"qualifierHasTheme": 1}, {"hasQualifier": True, "qualifierEndTime": BASE["startTime"]},
 ])
 def test_admin_validates_all_fields_before_side_effects(client, admin_case, method, patch):
     contest, schedule = admin_case
