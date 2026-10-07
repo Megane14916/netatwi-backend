@@ -16,3 +16,16 @@ HTTP影響: 従来の未捕捉例外/HTML 400/415や範囲外IDの200をJSON 400
 やってないこと: 他APIの検証、transaction/例外処理一般、schema変更。
 Python 3.11.16、隔離SQLite、外部通信拒否。対象/全体/CI結果は個別PRに記録。
 migration・本番設定変更なし。本番反映なし。PR単位のrevertで戻せる。
+
+## 大会管理API
+
+基準`dbeff1c`。追加68件は修正前67失敗/1成功、修正後の管理/認証関連114件成功。
+create/updateの全フィールドを更新前に検証。name/passwordのDB上限、真偽値の型、
+整数の型/32bit範囲・非負の重み・正の最大点/分母、enum、文字列/null、期間順序と
+部分更新後の期間・進出率を確認する。数値文字列は従来どおり許容する。
+日時はUTCへ正規化して保存し、オフセット消失を修正する。naive入力は従来どおりUTC。
+旧enum general/forbiddenはuser/noneへ正規化し、一般票・画像禁止の条件を適用する。
+不正JSONと検証失敗はJSON 400へ変更し、DB・Cloud Tasksに副作用を出さない。
+frontendはISO日時、number/booleanと有効enumを送るため正常系の調整不要。
+既存の不正値/ゼロ分母/forbiddenの特性テストは意図した契約のみ更新した。
+他APIの入力検証は後続PR。DB schema/migration・本番設定変更なし。
