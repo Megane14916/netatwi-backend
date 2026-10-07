@@ -117,15 +117,20 @@ def test_lazy_imports_precede_input_and_pagination(client, monkeypatch):
 
 
 @pytest.mark.parametrize("stage", ("query", "json"))
-def test_directory_failures_propagate_without_rollback(client, monkeypatch, stage):
+def test_directory_failures_return_json_500_and_rollback(client, monkeypatch, stage):
+    from unittest.mock import Mock
+    original_rollback = db.session.rollback
     reject_writes(monkeypatch)
+    rollback = Mock(wraps=original_rollback)
+    monkeypatch.setattr(db.session, "rollback", rollback)
 
     def fail(*_args, **_kwargs):
         raise RuntimeError("directory failure")
 
     monkeypatch.setattr(FlaskQuery, "paginate", fail) if stage == "query" else monkeypatch.setattr(directory_routes, "jsonify", fail)
-    with pytest.raises(RuntimeError, match="directory failure"):
-        client.get("/api/users")
+    response = client.get("/api/users")
+    assert response.status_code == 500 and response.get_json() == {"error": "Internal server error"}
+    rollback.assert_called_once_with()
 
 
 @pytest.mark.parametrize("setting, name, admin", [(None, "dummy_admin1", True), (None, "dummy_admin2", True),
@@ -233,7 +238,7 @@ def test_withdrawal_updates_timestamp_once_retains_related_data_then_clears_sess
 
 
 @pytest.mark.parametrize("stage", ("query", "datetime", "commit", "clear", "json"))
-def test_withdrawal_failures_keep_uncaught_exception_and_session_order(client, user_factory, monkeypatch, stage):
+def test_withdrawal_failures_return_json_500_and_keep_session_order(client, user_factory, monkeypatch, stage):
     user = user_factory("member")
     ident = user.id
     events = []
@@ -271,9 +276,9 @@ def test_withdrawal_failures_keep_uncaught_exception_and_session_order(client, u
         monkeypatch.setattr(withdrawal_module, "datetime", SimpleNamespace(now=fail))
     elif stage == "json":
         monkeypatch.setattr(account_routes, "jsonify", fail)
-    with pytest.raises(RuntimeError, match="withdrawal failure"):
-        client.delete("/api/users/me")
-    assert events == (["rollback"] if stage in ("query", "datetime") else ["commit", "rollback"] if stage == "commit" else ["commit", "clear"])
+    response = client.delete("/api/users/me")
+    assert response.status_code == 500 and response.get_json() == {"error": "Internal server error"}
+    assert events == (["rollback", "rollback"] if stage in ("query", "datetime") else ["commit", "rollback", "rollback"] if stage == "commit" else ["commit", "clear", "rollback"])
     assert snapshot == ({} if stage == "json" else {"user_id": ident, "screen_name": "member", "extra": "keep"})
     if stage in ("clear", "json"):
         assert user.deleted_at is not None  # Commit survives later response/session failure.

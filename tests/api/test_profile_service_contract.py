@@ -5,6 +5,8 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from flask import current_app
+from unittest.mock import Mock
 from sqlalchemy.orm import Query
 
 from app.routes import profile as routes
@@ -36,7 +38,7 @@ def clock(monkeypatch, read):
     return calls
 
 
-def observe_reads(monkeypatch):
+def observe_reads(monkeypatch, *, allow_rollback=False):
     events = []
     original_all, original_first = Query.all, Query.first
 
@@ -55,7 +57,7 @@ def observe_reads(monkeypatch):
     monkeypatch.setattr(Query, "first", first)
     monkeypatch.setattr(Query, "count", reject)
     monkeypatch.setattr(db.session, "commit", reject)
-    monkeypatch.setattr(db.session, "rollback", reject)
+    monkeypatch.setattr(db.session, "rollback", Mock(wraps=db.session.rollback) if allow_rollback else reject)
     return events
 
 
@@ -246,7 +248,8 @@ def test_results_cache_is_per_request_and_uses_saved_results(client, profile_dat
     assert calls == [profile_data.closed.id, profile_data.second.id] * 2
 
 
-def test_clock_logs_and_session_read_before_target_query(client, profile_data, monkeypatch, capsys):
+def test_clock_logs_and_session_read_before_target_query(client, profile_data, monkeypatch, capsys, caplog):
+    caplog.set_level("INFO", logger="app")
     values = iter(range(10, 20))
     calls = clock(monkeypatch, lambda: next(values))
     reads = observe_reads(monkeypatch)
@@ -260,13 +263,14 @@ def test_clock_logs_and_session_read_before_target_query(client, profile_data, m
     steps = ["target_user query", "query user_posts_raw", "query bookmarks_raw", "query liked_posts_raw",
              "filter and collect all post_ids", "bulk fetch votes_data", "bulk fetch awards_data",
              "bulk fetch viewer_bms", "format_posts_fast all lists"]
-    assert capsys.readouterr().out.splitlines() == [
+    assert capsys.readouterr().out == ""
+    assert caplog.messages == [
         f"PROFILE_PERF_LOG: [{step}] took 1.0000s (Total: {i}.0000s)" for i, step in enumerate(steps, 1)]
     assert len(calls) == 10
 
 
 @pytest.mark.parametrize("index", range(10))
-def test_each_clock_failure_is_inside_original_exception_handler(client, profile_data, login, monkeypatch, capsys, index):
+def test_each_clock_failure_is_inside_original_exception_handler(client, profile_data, login, monkeypatch, capsys, caplog, index):
     login(profile_data.reader)
     position = 0
 
@@ -279,19 +283,21 @@ def test_each_clock_failure_is_inside_original_exception_handler(client, profile
         return current
 
     calls = clock(monkeypatch, read)
-    observe_reads(monkeypatch)
+    observe_reads(monkeypatch, allow_rollback=True)
     response = client.get("/api/profile/target")
     assert response.status_code == 500 and response.get_json() == {"error": "Error"}
     output = capsys.readouterr()
-    assert "clock failure" in output.out and "RuntimeError: clock failure" in output.err
+    assert "RuntimeError" in caplog.text
+    assert "clock failure" not in caplog.text + output.out + output.err
+    assert db.session.rollback.call_count == 1
     assert len(calls) == index + 1
 
 
 @pytest.mark.parametrize("stage", ("target", "raw_posts", "bookmarks", "likes", "votes", "awards", "viewer_bookmarks",
                                  "results", "datetime", "filter", "format", "session", "json", "not_found_json", "perf_print"))
-def test_failures_keep_print_traceback_500_and_no_rollback(client, profile_data, login, monkeypatch, capsys, stage):
+def test_failures_return_500_with_safe_logs_and_rollback(client, profile_data, login, monkeypatch, capsys, caplog, stage):
     login(profile_data.reader)
-    observe_reads(monkeypatch)
+    observe_reads(monkeypatch, allow_rollback=True)
 
     def fail(*_args, **_kwargs):
         raise RuntimeError("profile failure")
@@ -340,15 +346,17 @@ def test_failures_keep_print_traceback_500_and_no_rollback(client, profile_data,
 
         monkeypatch.setattr(routes, "jsonify", encode)
     elif stage == "perf_print":
-        original = builtins.print
+        original = current_app.logger.info
 
         def print_log(*args, **kwargs):
             if args and str(args[0]).startswith("PROFILE_PERF_LOG:"):
                 fail()
             return original(*args, **kwargs)
 
-        monkeypatch.setattr(builtins, "print", print_log)
+        monkeypatch.setattr(current_app.logger, "info", print_log)
     response = client.get("/api/profile/missing" if stage == "not_found_json" else "/api/profile/target")
     assert response.status_code == 500 and response.get_json() == {"error": "Error"}
     output = capsys.readouterr()
-    assert "profile failure" in output.out and "RuntimeError: profile failure" in output.err
+    assert "profile.get_user_profile" in caplog.text and "RuntimeError" in caplog.text
+    assert "profile failure" not in caplog.text + output.out + output.err
+    assert db.session.rollback.call_count == 1

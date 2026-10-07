@@ -205,7 +205,7 @@ def test_default_empty_and_case_sensitive_admin_settings(client, monkeypatch, us
 
 @pytest.mark.parametrize("path", ("/api/news", "/api/admin/news"))
 @pytest.mark.parametrize("stage", ("query", "format", "json"))
-def test_list_failures_keep_500_print_without_rollback(client, admin, saved_news, monkeypatch, capsys, path, stage):
+def test_list_failures_return_500_with_safe_logs_and_rollback(client, admin, saved_news, monkeypatch, capsys, caplog, path, stage):
     events = transactions(monkeypatch)
 
     def fail(*_args, **_kwargs):
@@ -227,8 +227,9 @@ def test_list_failures_keep_500_print_without_rollback(client, admin, saved_news
     response = client.get(path)
     assert response.status_code == 500 and response.get_json() == {"error": "ニュースの取得に失敗しました。"}
     output = capsys.readouterr()
-    assert f"!!! ERROR at GET {path}: list failure" in output.out and output.err == ""
-    assert events == []
+    assert "RuntimeError" in caplog.text and "news.get_" in caplog.text
+    assert "list failure" not in caplog.text + output.out + output.err
+    assert events == ["rollback"]
 
 
 def test_delete_then_repeat_preserves_not_found_without_second_transaction(client, admin, saved_news, monkeypatch):
@@ -245,7 +246,7 @@ def test_delete_then_repeat_preserves_not_found_without_second_transaction(clien
 @pytest.mark.parametrize("action, stage", [("add", "add"), ("add", "commit"), ("delete", "get"),
                                          ("delete", "delete"), ("delete", "commit"),
                                          ("add", "json"), ("delete", "json")])
-def test_write_failures_keep_transaction_order_and_partial_commit(client, admin, saved_news, monkeypatch, capsys, action, stage):
+def test_write_failures_keep_transaction_order_and_partial_commit(client, admin, saved_news, monkeypatch, capsys, caplog, action, stage):
     ident = saved_news.id
     events = transactions(monkeypatch)
 
@@ -286,8 +287,8 @@ def test_write_failures_keep_transaction_order_and_partial_commit(client, admin,
     assert rows == ({"existing", "new"} if action == "add" and stage == "json"
                     else set() if action == "delete" and stage == "json" else {"existing"})
     output = capsys.readouterr()
-    assert f"!!! ERROR at {'POST' if action == 'add' else 'DELETE'} {path}: write failure" in output.out
-    assert output.err == ""
+    assert "RuntimeError" in caplog.text and "news." in caplog.text
+    assert "write failure" not in caplog.text + output.out + output.err
 
 
 def test_addition_returns_captured_id_without_post_commit_refresh(client, admin, monkeypatch):
@@ -317,7 +318,7 @@ def test_addition_returns_captured_id_without_post_commit_refresh(client, admin,
 
 
 @pytest.mark.parametrize("action", ("add", "delete"))
-def test_rollback_failure_propagates_out_of_original_except(client, admin, saved_news, monkeypatch, action):
+def test_rollback_failure_uses_common_500_handler(client, admin, saved_news, monkeypatch, action):
     ident = saved_news.id
     events = []
 
@@ -331,12 +332,10 @@ def test_rollback_failure_propagates_out_of_original_except(client, admin, saved
 
     monkeypatch.setattr(db.session, "commit", commit)
     monkeypatch.setattr(db.session, "rollback", rollback)
-    with pytest.raises(RuntimeError, match="rollback failure"):
-        if action == "add":
-            client.post("/api/admin/news", json={"tweet_id": "123"})
-        else:
-            client.delete(f"/api/admin/news/{ident}")
-    assert events == ["commit", "rollback"]
+    response = (client.post("/api/admin/news", json={"tweet_id": "123"}) if action == "add"
+                else client.delete(f"/api/admin/news/{ident}"))
+    assert response.status_code == 500 and response.get_json() == {"error": "Internal server error"}
+    assert events == ["commit", "rollback", "rollback"]
 
 
 @pytest.mark.parametrize("action", ("add", "delete"))

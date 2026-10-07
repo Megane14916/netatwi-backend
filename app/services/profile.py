@@ -1,6 +1,7 @@
 """Profile queries, visibility and presentation with original result reuse."""
 
 from datetime import datetime, timedelta, timezone
+from flask import current_app
 from sqlalchemy.orm import joinedload
 from app.services import policies
 from app.extensions import db
@@ -18,7 +19,7 @@ def prepare_profile_timing(time):
     def log_step(step_name):
         nonlocal perf_prev_time
         curr = time.time()
-        print(
+        current_app.logger.info(
             f"PROFILE_PERF_LOG: [{step_name}] took {curr - perf_prev_time:.4f}s (Total: {curr - perf_start_time:.4f}s)"
         )
         perf_prev_time = curr

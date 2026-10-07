@@ -1,6 +1,8 @@
 """HTTP input/output for X OAuth and judge authentication."""
 
-import traceback
+from werkzeug.exceptions import HTTPException
+from app.diagnostics import log_failure
+
 
 from flask import current_app, jsonify, redirect, request, session
 
@@ -74,7 +76,9 @@ def judge_login(id):
         if result == "authenticated":
             return jsonify({"redirectUrl": f"/venue/{id}"}), 200
         return jsonify({"error": "パスワードが正しくありません。"}), 401
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"!!! ERROR at POST /api/contests/{id}/judge/login: {e}")
-        traceback.print_exc()
+        db.session.rollback()
+        log_failure("auth.judge_login", e)
         return jsonify({"error": "審査員認証中にエラーが発生しました。"}), 500

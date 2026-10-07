@@ -64,12 +64,12 @@ def test_exact_anonymous_and_missing_post_responses(client, user_factory, login,
     login(user_factory("reader"))
     events.clear()
     response = client.open(f"/api/posts/999/{kind}", method=method)
-    assert response.status_code == (404 if kind == "bookmark" else 500)
-    assert response.get_json() == ({"error": "投稿が見つかりません。"} if kind == "bookmark" else LIKE_ERROR)
-    assert events == ([] if kind == "bookmark" else ["rollback"])
+    assert response.status_code == 404
+    assert response.get_json() == ({"error": "投稿が見つかりません。"} if kind == "bookmark" else {"error": "Not Found"})
+    assert events == []
 
 
-def test_bookmark_recounts_source_rows_and_commits_twice_on_every_request(
+def test_bookmark_recounts_source_rows_and_commits_once_on_every_request(
     client, interaction_case, user_factory, monkeypatch
 ):
     post, reader, _ = interaction_case
@@ -337,7 +337,7 @@ def test_real_unique_constraint_race_recovers_existing_row(
 
 
 @pytest.mark.parametrize("kind", ("bookmark", "like"))
-def test_recovery_query_failure_propagates_outside_generic_handler(
+def test_recovery_query_failure_uses_common_500_handler(
     client, interaction_case, monkeypatch, kind
 ):
     post, _, _ = interaction_case
@@ -358,10 +358,10 @@ def test_recovery_query_failure_propagates_outside_generic_handler(
 
     monkeypatch.setattr(db.session, "commit", fail_commit)
     monkeypatch.setattr(Query, "count", fail_count)
-    with pytest.raises(RuntimeError, match="recovery failure"):
-        client.put(f"/api/posts/{post.id}/{kind}")
-    assert events[-2:] == ["rollback", "recovery failure"]
-    assert events.count("rollback") == 1
+    response = client.put(f"/api/posts/{post.id}/{kind}")
+    assert response.status_code == 500 and response.get_json() == {"error": "Internal server error"}
+    assert events[-3:] == ["rollback", "recovery failure", "rollback"]
+    assert events.count("rollback") == 2
 
 
 @pytest.mark.parametrize("method", ("PUT", "DELETE"))

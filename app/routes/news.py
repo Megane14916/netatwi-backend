@@ -1,5 +1,8 @@
 """Public and administrative news routes."""
 
+from werkzeug.exceptions import HTTPException
+from app.diagnostics import log_failure
+
 from flask import jsonify, request, session
 
 from app.extensions import db
@@ -17,8 +20,11 @@ def get_news():
     try:
         payload, status = news_service.get_news()
         return jsonify(payload), status
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"!!! ERROR at GET /api/news: {e}")
+        db.session.rollback()
+        log_failure("news.get_news", e)
         return jsonify({"error": "ニュースの取得に失敗しました。"}), 500
 
 
@@ -31,8 +37,11 @@ def get_admin_news():
     try:
         payload, status = news_service.get_admin_news()
         return jsonify(payload), status
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"!!! ERROR at GET /api/admin/news: {e}")
+        db.session.rollback()
+        log_failure("news.get_admin_news", e)
         return jsonify({"error": "ニュースの取得に失敗しました。"}), 500
 
 
@@ -47,9 +56,11 @@ def add_news():
         tweet_id = data.get("tweet_id")
         payload, status = news_service.add_news(tweet_id)
         return jsonify(payload), status
+    except HTTPException:
+        raise
     except Exception as e:
+        log_failure("news.add_news", e)
         db.session.rollback()
-        print(f"!!! ERROR at POST /api/admin/news: {e}")
         return jsonify({"error": "ニュースの追加に失敗しました。"}), 500
 
 
@@ -62,7 +73,9 @@ def delete_news(id):
     try:
         payload, status = news_service.delete_news(id)
         return jsonify(payload), status
+    except HTTPException:
+        raise
     except Exception as e:
+        log_failure("news.delete_news", e)
         db.session.rollback()
-        print(f"!!! ERROR at DELETE /api/admin/news/{id}: {e}")
         return jsonify({"error": "ニュースの削除に失敗しました。"}), 500

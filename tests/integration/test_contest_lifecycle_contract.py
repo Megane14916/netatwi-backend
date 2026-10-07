@@ -261,12 +261,14 @@ def test_schedule_timestamp_url_headers_and_exact_past_boundary(app, fixed_time,
     assert task["schedule_time"].ToDatetime(tzinfo=timezone.utc) == expected
 
 
-def test_schedule_missing_config_fallback_and_error_boundaries(app, fixed_time, fake_cloud_tasks, monkeypatch, capsys):
+def test_schedule_missing_config_fallback_and_error_boundaries(app, fixed_time, fake_cloud_tasks, monkeypatch, capsys, caplog):
+    caplog.set_level("INFO", logger="app")
     fixed_time(NOW)
     monkeypatch.setitem(current_app.config, "GCP_PROJECT_ID", "")
     cloud_tasks.schedule_contest_task(42, "post_start", NOW)
     fake_cloud_tasks.create_task.assert_not_called()
-    assert capsys.readouterr().out == "Skipping task scheduling for post_start - GCP configuration missing.\n"
+    assert capsys.readouterr().out == ""
+    assert "Task scheduling skipped; event=post_start; configuration missing" in caplog.text
     monkeypatch.setitem(current_app.config, "GCP_PROJECT_ID", "test")
     monkeypatch.setitem(current_app.config, "TASK_HANDLER_URL", "")
     monkeypatch.setitem(current_app.config, "GCR_URL", "https://fallback.example/")
@@ -274,7 +276,9 @@ def test_schedule_missing_config_fallback_and_error_boundaries(app, fixed_time, 
     assert cloud_tasks.schedule_contest_task(42, "post_start", NOW) is None
     assert fake_cloud_tasks.create_task.call_args.kwargs["request"]["task"]["http_request"]["url"] == (
         "https://fallback.example//api/tasks/contest/42/post_start")
-    assert capsys.readouterr().out == "Failed to create task for post_start: API failed\n"
+    assert capsys.readouterr().out == ""
+    assert "cloud_tasks.schedule_contest_task" in caplog.text and "RuntimeError" in caplog.text
+    assert "API failed" not in caplog.text
     fake_cloud_tasks.queue_path.side_effect = RuntimeError("queue failed")
     with pytest.raises(RuntimeError, match="queue failed"):
         cloud_tasks.schedule_contest_task(42, "post_start", NOW)

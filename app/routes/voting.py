@@ -1,5 +1,8 @@
 """Bulk voting routes."""
 
+from werkzeug.exceptions import HTTPException
+from app.diagnostics import log_failure
+
 from flask import jsonify, request, session
 
 from app.extensions import db
@@ -42,10 +45,9 @@ def submit_votes(id):
             start_time,
         )
         return jsonify(result), status
+    except HTTPException:
+        raise
     except Exception as e:
+        log_failure("voting.submit_votes", e)
         db.session.rollback()
-        current_app.logger.error(
-            f"==> [submit_votes] ERROR in {time.time() - start_time:.4f}s: {e}"
-        )
-        print(f"Error: {e}")
         return jsonify({"error": "Error"}), 500

@@ -36,8 +36,8 @@ def test_result_failure_rolls_back_and_retry_runs_once(
 
     monkeypatch.setattr(db.session, method, fail)
     if entry == "task":
-        with pytest.raises(RuntimeError, match="injected persistence failure"):
-            invoke()
+        response = invoke()
+        assert response.status_code == 500 and response.get_json() == {"error": "Internal server error"}
     else:
         assert invoke().exit_code != 0
     db.session.expire_all()

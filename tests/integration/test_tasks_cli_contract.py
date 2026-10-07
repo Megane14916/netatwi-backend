@@ -159,7 +159,7 @@ def test_process_contests_commit_order_and_cleanup_boundary(
 
 
 def test_process_contests_cleanup_failure_rolls_back_and_finishes(
-    runner, fixed_time, monkeypatch
+    runner, fixed_time, monkeypatch, caplog
 ):
     from flask_sqlalchemy.query import Query
 
@@ -178,7 +178,8 @@ def test_process_contests_cleanup_failure_rolls_back_and_finishes(
     monkeypatch.setattr(db.session, "rollback", rollback)
     result = runner.invoke(args=["process-contests"])
     assert result.exit_code == 0
-    assert "Failed to delete old notifications: cleanup failure" in result.output
+    assert "contest_lifecycle.cleanup_notifications" in caplog.text and "RuntimeError" in caplog.text
+    assert "cleanup failure" not in result.output + caplog.text
     assert result.output.endswith("--- process-contests batch completed ---\n")
     assert events == ["rollback"]
 
@@ -257,8 +258,8 @@ def test_result_generation_failure_propagates_before_notification_commit(
 
     monkeypatch.setattr(results_service, "generate_contest_results", fail_generation)
     if entry_point == "task":
-        with pytest.raises(RuntimeError, match="generation failed"):
-            task_client.post(f"/api/tasks/contest/{contest.id}/result_announce")
+        response = task_client.post(f"/api/tasks/contest/{contest.id}/result_announce")
+        assert response.status_code == 500 and response.get_json() == {"error": "Internal server error"}
     else:
         result = runner.invoke(args=["process-contests"])
         assert result.exit_code == 1

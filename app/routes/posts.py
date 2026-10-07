@@ -1,5 +1,8 @@
 """Contest post listing and CRUD routes."""
 
+from werkzeug.exceptions import HTTPException
+from app.diagnostics import log_failure
+
 import json
 from datetime import timedelta, timezone
 
@@ -28,8 +31,11 @@ def get_posts_for_contest(id):
         return jsonify(
             contest_post_service.get_posts_for_contest(id, c, posts, user_id, t2, start_time, time)
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"!!! ERROR at GET /api/contests/{id}/posts: {e}")
+        db.session.rollback()
+        log_failure("posts.get_posts_for_contest", e)
         return jsonify({"error": "Failed to fetch posts"}), 500
 
 
@@ -66,9 +72,11 @@ def submit_post(id):
             }
         ), 201
 
+    except HTTPException:
+        raise
     except Exception as e:
+        log_failure("posts.submit_post", e)
         db.session.rollback()
-        print(f"Error: {e}")
         return jsonify({"error": "Error"}), 500
 
 
@@ -119,9 +127,11 @@ def update_post(contest_id, post_id):
                 "myVotes": None,
             }
         ), 200
+    except HTTPException:
+        raise
     except Exception as e:
+        log_failure("posts.update_post", e)
         db.session.rollback()
-        print(e)
         return jsonify({"error": "Error"}), 500
 
 
@@ -133,7 +143,9 @@ def delete_post(contest_id, post_id):
     try:
         result, status = post_service.delete_post(contest_id, post_id, user_id)
         return jsonify(result), status
+    except HTTPException:
+        raise
     except Exception as e:
+        log_failure("posts.delete_post", e)
         db.session.rollback()
-        print(e)
         return jsonify({"error": "Error"}), 500

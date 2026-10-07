@@ -100,13 +100,13 @@ def test_result_commit_failure_prevents_notification_commit(
     contest, author, _ = finished
     events = observe_writes(monkeypatch, "commit")
     if entry_point == "task":
-        with pytest.raises(RuntimeError, match="commit failed"):
-            task_client.post(f"/api/tasks/contest/{contest.id}/result_announce")
+        response = task_client.post(f"/api/tasks/contest/{contest.id}/result_announce")
+        assert response.status_code == 500 and response.get_json() == {"error": "Internal server error"}
     else:
         result = runner.invoke(args=["process-contests"])
         assert result.exit_code == 1
         assert str(result.exception) == "commit failed"
-    assert events == [("results", 1), "commit", "rollback"]
+    assert events == [("results", 1), "commit", "rollback"] + (["rollback"] if entry_point == "task" else [])
     assert ContestResult.query.count() == 0
     assert Notification.query.count() == 0
     assert contest.notified_result_announce is False
@@ -216,12 +216,11 @@ def test_award_tab_keeps_foreign_contest_post_and_does_not_filter_judge_flag(
     }]
 
 
-def test_missing_result_contest_remains_generic_500_with_traceback(client, monkeypatch, capsys):
+def test_missing_result_contest_is_json_404_without_traceback(client, monkeypatch, capsys):
     events = observe_writes(monkeypatch)
     response = client.get("/api/contests/999/results")
-    assert response.status_code == 500
-    assert response.get_json() == {"error": "Error"}
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Not Found"}
     captured = capsys.readouterr()
-    assert "404 Not Found" in captured.out
-    assert "Traceback (most recent call last)" in captured.err
+    assert captured.out == captured.err == ""
     assert events == []

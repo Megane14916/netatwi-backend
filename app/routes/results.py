@@ -1,6 +1,9 @@
 """Contest result presentation routes."""
 
-import traceback
+from werkzeug.exceptions import HTTPException
+from app.diagnostics import log_failure
+from app.extensions import db
+
 
 from flask import jsonify, session
 
@@ -17,7 +20,9 @@ def get_contest_results(id):
         user_id = session.get("user_id")
         result, status = results_service.get_contest_results(id, user_id)
         return jsonify(result), status
+    except HTTPException:
+        raise
     except Exception as e:
-        print(e)
-        traceback.print_exc()
+        db.session.rollback()
+        log_failure("results.get_contest_results", e)
         return jsonify({"error": "Error"}), 500
