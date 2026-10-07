@@ -46,8 +46,10 @@ def add_news(tweet_id):
 
     new_news = News(tweet_id=tweet_id)
     db.session.add(new_news)
+    db.session.flush()
+    news_id = new_news.id
     db.session.commit()
-    return ({"message": "ニュースを追加しました。", "id": new_news.id}), 201
+    return ({"message": "ニュースを追加しました。", "id": news_id}), 201
 
 
 def delete_news(id):

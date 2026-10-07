@@ -260,7 +260,11 @@ def test_withdrawal_failures_keep_uncaught_exception_and_session_order(client, u
         return original_commit()
 
     monkeypatch.setattr(db.session, "commit", commit)
-    monkeypatch.setattr(db.session, "rollback", lambda: pytest.fail("No automatic rollback"))
+    original_rollback = db.session.rollback
+    def rollback():
+        events.append("rollback")
+        original_rollback()
+    monkeypatch.setattr(db.session, "rollback", rollback)
     if stage == "query":
         monkeypatch.setattr(Query, "get", fail)
     elif stage == "datetime":
@@ -269,7 +273,7 @@ def test_withdrawal_failures_keep_uncaught_exception_and_session_order(client, u
         monkeypatch.setattr(account_routes, "jsonify", fail)
     with pytest.raises(RuntimeError, match="withdrawal failure"):
         client.delete("/api/users/me")
-    assert events == ([] if stage in ("query", "datetime") else ["commit"] if stage == "commit" else ["commit", "clear"])
+    assert events == (["rollback"] if stage in ("query", "datetime") else ["commit", "rollback"] if stage == "commit" else ["commit", "clear"])
     assert snapshot == ({} if stage == "json" else {"user_id": ident, "screen_name": "member", "extra": "keep"})
     if stage in ("clear", "json"):
         assert user.deleted_at is not None  # Commit survives later response/session failure.

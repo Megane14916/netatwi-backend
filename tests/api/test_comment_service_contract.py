@@ -318,8 +318,7 @@ def test_commit_failure_propagates_without_added_rollback(
         client.open(path, method=method, json={"content": "Changed"})
     assert writes == (["add Comment", "commit failure"] if method == "POST"
                       else ["delete Comment", "commit failure"] if method == "DELETE"
-                      else ["commit failure"])
-    db.session.rollback()
+                      else ["commit failure"]) + ["rollback"]
     assert Comment.query.count() == (0 if method == "POST" else 1)
     assert post.comment_count == (0 if method == "POST" else 1)
     if method != "POST":

@@ -26,20 +26,20 @@ def set_bookmark(post_id, user_id, post, is_bookmarked):
     elif not is_bookmarked and existing_bookmark:
         db.session.delete(existing_bookmark)
 
-    db.session.commit()
+    db.session.flush()
 
     # Recalculate from the source rows instead of blindly incrementing or
     # decrementing a cached counter. This keeps repeated PUT/DELETE calls
     # idempotent and prevents the counter from becoming negative.
-    post.bookmark_count = Bookmark.query.filter_by(post_id=post_id).count()
+    bookmark_count = Bookmark.query.filter_by(post_id=post_id).count()
+    post.bookmark_count = bookmark_count
     db.session.commit()
-    db.session.refresh(post)
 
     return (
         {
             "message": "ブックマークを更新しました。",
             "isBookmarked": is_bookmarked,
-            "bookmarkCount": post.bookmark_count,
+            "bookmarkCount": bookmark_count,
         }
     ), 200
 
@@ -106,12 +106,13 @@ def set_like(post_id, user_id, post, c, is_liked):
         # 通知生成
         notifications_service.create_like_notification(post, post_id, user_id, c)
 
-    db.session.commit()
+    db.session.flush()
 
     # 最新のいいね数
     like_count = Vote.query.filter_by(
         post_id=post_id, is_judge_vote=False, count=1
     ).count()
+    db.session.commit()
     return ({"isLiked": is_liked, "likeCount": like_count}), 200
 
 

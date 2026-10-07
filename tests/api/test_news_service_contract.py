@@ -290,7 +290,7 @@ def test_write_failures_keep_transaction_order_and_partial_commit(client, admin,
     assert output.err == ""
 
 
-def test_post_commit_id_refresh_failure_cannot_undo_addition(client, admin, monkeypatch):
+def test_addition_returns_captured_id_without_post_commit_refresh(client, admin, monkeypatch):
     events = transactions(monkeypatch)
     original_commit = db.session.commit
     committed = False
@@ -310,8 +310,9 @@ def test_post_commit_id_refresh_failure_cannot_undo_addition(client, admin, monk
         response = client.post("/api/admin/news", json={"tweet_id": "123"})
     finally:
         event.remove(db.engine, "before_cursor_execute", fail_refresh)
-    assert response.status_code == 500 and response.get_json() == ADD_ERROR
-    assert events == ["add", "commit", "rollback"]
+    assert response.status_code == 201
+    assert isinstance(response.get_json()["id"], int)
+    assert events == ["add", "commit"]
     assert [row.tweet_id for row in News.query.all()] == ["123"]
 
 
