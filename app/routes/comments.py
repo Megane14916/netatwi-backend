@@ -4,6 +4,7 @@ from flask import jsonify, request, session
 
 from app.services import comments as comments_service
 from app.services import policies
+from app.services import validation
 from flask import Blueprint
 
 
@@ -22,7 +23,7 @@ def get_multiple_comments():
         return jsonify({})
 
     try:
-        post_ids = [int(pid) for pid in post_ids_param.split(",")]
+        post_ids = [validation.positive_id(pid) for pid in post_ids_param.split(",")]
     except ValueError:
         return jsonify({"error": "Invalid postIds format"}), 400
     return jsonify(comments_service.get_multiple_comments(post_ids))
@@ -35,7 +36,7 @@ def add_comment(post_id):
 
     user_id = session["user_id"]
     post = comments_service.get_post(post_id)
-    data = request.get_json()
+    data = validation.json_object()
     raw_content = data.get("content", "")
 
     judge_contests = session.get("judge_for_contest_ids", [])
@@ -59,7 +60,7 @@ def modify_comment(comment_id):
         result, status = comments_service.delete_comment(comment)
         return jsonify(result), status
 
-    data = request.get_json()
+    data = validation.json_object()
     raw_content = data.get("content", "")
     result, status = comments_service.update_comment(comment, raw_content)
     return jsonify(result), status
