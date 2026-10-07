@@ -6,6 +6,7 @@ from app.extensions import db
 from app.services import voting as voting_service
 from flask import current_app
 from app.services import policies
+from app.services.validation import json_object
 from flask import Blueprint
 
 
@@ -22,7 +23,7 @@ def submit_votes(id):
         return jsonify({"error": "Login required"}), 401
 
     user_id = session["user_id"]
-    data = request.get_json()
+    data = json_object()
     votes_to_submit = data.get("votes")  # { "postId": count }
     judge_award = data.get("judgeAward")  # { "postId": 123, "comment": "..." } or null
     content = request.form.get("content", "")
