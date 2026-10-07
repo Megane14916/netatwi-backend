@@ -99,12 +99,12 @@ def validate_contest(data, contest=None):
         times.append(_date(value, field) if value is not None else getattr(contest, FIELDS[field], None))
     if contest is None or any(field in data for field in ("startTime", "endTime", "votingEndTime")):
         times = [value.replace(tzinfo=timezone.utc) for value in times]
-        if not times[0] < times[1] < times[2]:
+        if not times[0] <= times[1] <= times[2]:
             _invalid("period")
     if create_qualifier:
         qt = [_date(normalized.get("qualifier" + field) or times[index].isoformat(), "qualifier" + field)
               for index, field in enumerate(("StartTime", "EndTime", "VotingEndTime"))]
-        if not qt[0] < qt[1] < qt[2]:
+        if not qt[0] <= qt[1] <= qt[2]:
             _invalid("qualifierPeriod")
     numerator = normalized.get("advancementNumerator", getattr(contest, "advancement_numerator", None))
     denominator = normalized.get("advancementDenominator", getattr(contest, "advancement_denominator", None))

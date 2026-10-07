@@ -30,7 +30,7 @@ def admin_case(user_factory, login, contest_factory, monkeypatch):
     {"generalVoteWeight": -1}, {"generalVoteWeight": 2**31}, {"judgeMaxScore": 0},
     {"judgePassword": {}}, {"judgePassword": "s" * 121}, {"theme": []}, {"resultCommentTop": []},
     {"startTime": None}, {"endTime": "bad"}, {"votingEndTime": 123},
-    {"endTime": BASE["startTime"]}, {"votingEndTime": BASE["endTime"]},
+    {"endTime": "2025-12-31T23:59:59Z"}, {"votingEndTime": "2026-01-01T00:59:59Z"},
     {"type": "invalid"}, {"scoringMethod": []}, {"imageRule": "invalid"},
     {"advancementDenominator": 0}, {"advancementNumerator": 3, "advancementDenominator": 2},
 ])
