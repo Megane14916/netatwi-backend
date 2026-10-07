@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 import boto3
 from werkzeug.utils import secure_filename
 from flask import current_app
+from app.diagnostics import log_failure
 
 
 def get_r2_client():
@@ -52,7 +53,7 @@ def _save_file(
             )
             return f"{R2_PUBLIC_URL}/{unique_filename}"
         except Exception as e:
-            logger.error(f"R2 Upload Error: {e}")
+            log_failure("images.upload_r2", e, logger=logger)
             e.uploaded_image_url = f"{R2_PUBLIC_URL}/{unique_filename}"
             raise e
     else:
@@ -61,6 +62,7 @@ def _save_file(
         try:
             file.save(file_path)
         except Exception as e:
+            log_failure("images.upload_local", e, logger=logger)
             e.uploaded_image_url = f"/static/uploads/{unique_filename}"
             raise
         # FlaskのstaticファイルとしてのURLを返す (本番ではFRONTEND_URL経由でアクセスできる前提)
@@ -88,7 +90,6 @@ def _delete_file(
                 logger.info(f"Deleting from R2: {filename}")
                 s3.delete_object(Bucket=R2_BUCKET_NAME, Key=filename)
             except Exception as e:
-                logger.error(f"Failed to delete from R2: {e}")
                 raise
         else:
             # ローカルから削除
@@ -97,7 +98,7 @@ def _delete_file(
                 os.remove(file_path)
                 logger.info(f"Deleted local file: {file_path}")
     except Exception as e:
-        logger.error(f"Error deleting file {file_url}: {e}")
+        log_failure("images.delete", e, logger=logger)
         raise
 
 

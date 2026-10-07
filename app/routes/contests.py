@@ -1,5 +1,9 @@
 """Contest listing and details routes."""
 
+from werkzeug.exceptions import HTTPException
+from app.diagnostics import log_failure
+from app.extensions import db
+
 from flask import jsonify, session
 
 from app.services import contests as contest_service
@@ -19,7 +23,11 @@ def get_contests():
 
     try:
         return jsonify(contest_service.get_contests(time))
+    except HTTPException:
+        raise
     except Exception as e:
+        db.session.rollback()
+        log_failure("contests.get_contests", e)
         return jsonify({"error": "Failed"}), 500
 
 
@@ -32,6 +40,9 @@ def get_contest_details(id):
         contest = contest_service.get_contest_for_details(id, start_time, time)
         user_id = session.get("user_id")
         return jsonify(contest_service.get_contest_details(contest, user_id, start_time, time))
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"!!! ERROR at /api/contests/{id}: {e}")
-        return jsonify({"error": "Contest not found"}), 404
+        db.session.rollback()
+        log_failure("contests.get_contest_details", e)
+        return jsonify({"error": "Internal server error"}), 500

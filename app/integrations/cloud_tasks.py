@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import current_app, request
 from google.auth import exceptions as auth_exceptions
+from app.diagnostics import log_failure
 from google.auth.transport.requests import Request
 from google.oauth2 import id_token
 
@@ -40,7 +41,7 @@ def schedule_contest_task(contest_id, event_type, schedule_time):
     service_account = current_app.config.get("TASKS_SERVICE_ACCOUNT_EMAIL")
 
     if not all([project, location, queue, handler_url]):
-        print(f"Skipping task scheduling for {event_type} - GCP configuration missing.")
+        current_app.logger.info("Task scheduling skipped; event=%s; configuration missing", event_type)
         return
 
     if not audience or not service_account:
@@ -78,6 +79,6 @@ def schedule_contest_task(contest_id, event_type, schedule_time):
 
     try:
         response = client.create_task(request={"parent": parent, "task": task})
-        print(f"Created task {response.name} for {event_type} at {schedule_time}")
+        current_app.logger.info("Task created; event=%s; schedule_time=%s", event_type, schedule_time)
     except Exception as e:
-        print(f"Failed to create task for {event_type}: {e}")
+        log_failure("cloud_tasks.schedule_contest_task", e)

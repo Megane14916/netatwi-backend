@@ -314,11 +314,11 @@ def test_commit_failure_propagates_without_added_rollback(
         raise RuntimeError("commit failure")
 
     monkeypatch.setattr(db.session, "commit", fail_commit)
-    with pytest.raises(RuntimeError, match="commit failure"):
-        client.open(path, method=method, json={"content": "Changed"})
+    response = client.open(path, method=method, json={"content": "Changed"})
+    assert response.status_code == 500 and response.get_json() == {"error": "Internal server error"}
     assert writes == (["add Comment", "commit failure"] if method == "POST"
                       else ["delete Comment", "commit failure"] if method == "DELETE"
-                      else ["commit failure"]) + ["rollback"]
+                      else ["commit failure"]) + ["rollback", "rollback"]
     assert Comment.query.count() == (0 if method == "POST" else 1)
     assert post.comment_count == (0 if method == "POST" else 1)
     if method != "POST":

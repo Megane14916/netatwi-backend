@@ -98,9 +98,9 @@ def test_notification_creation_failure_keeps_existing_error_boundary(
 
     monkeypatch.setattr(db.session, "add", reject_notification)
     if kind == "comment":
-        with pytest.raises(RuntimeError, match="notification failure"):
-            client.post(f"/api/posts/{post.id}/comments", json={"content": "Comment"})
-        assert events == ["Comment", "notification failure", "rollback"]
+        response = client.post(f"/api/posts/{post.id}/comments", json={"content": "Comment"})
+        assert response.status_code == 500 and response.get_json() == {"error": "Internal server error"}
+        assert events == ["Comment", "notification failure", "rollback", "rollback"]
     else:
         response = client.put(f"/api/posts/{post.id}/like")
         assert response.status_code == 500
@@ -200,9 +200,9 @@ def test_mark_read_commit_failure_propagates_without_route_rollback(
         raise RuntimeError("commit failure")
 
     monkeypatch.setattr(db.session, "commit", fail_commit)
-    with pytest.raises(RuntimeError, match="commit failure"):
-        client.post("/api/notifications/read")
-    assert events == ["commit failure", "rollback"]
+    response = client.post("/api/notifications/read")
+    assert response.status_code == 500 and response.get_json() == {"error": "Internal server error"}
+    assert events == ["commit failure", "rollback", "rollback"]
     assert db.session.get(Notification, notification_id).is_read is False
 
 

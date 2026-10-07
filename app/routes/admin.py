@@ -1,7 +1,9 @@
 """Contest administration routes."""
 
+from werkzeug.exceptions import HTTPException
+from app.diagnostics import log_failure
+
 import os
-import traceback
 
 from flask import current_app, jsonify, request, session
 
@@ -34,10 +36,11 @@ def create_contest():
         return jsonify(result), status
     except InputError as error:
         return jsonify({"error": str(error)}), 400
+    except HTTPException:
+        raise
     except Exception as e:
+        log_failure("admin.create_contest", e)
         db.session.rollback()
-        print(f"!!! ERROR at /api/admin/contests: {e}")
-        traceback.print_exc()
         return jsonify({"error": "Failed to create contest"}), 500
 
 
@@ -50,9 +53,11 @@ def get_management_contests():
 
     try:
         return jsonify(contest_service.get_management_contests())
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"!!! ERROR at GET /api/admin/contests/management: {e}")
-        traceback.print_exc()
+        db.session.rollback()
+        log_failure("admin.get_management_contests", e)
         return jsonify({"error": "Failed to fetch contests for management"}), 500
 
 
@@ -74,10 +79,11 @@ def update_contest(id):
         return jsonify(result), status
     except InputError as error:
         return jsonify({"error": str(error)}), 400
+    except HTTPException:
+        raise
     except Exception as e:
+        log_failure("admin.update_contest", e)
         db.session.rollback()
-        print(f"!!! ERROR at PUT /api/admin/contests/{id}: {e}")
-        traceback.print_exc()
         return jsonify({"error": "Failed to update contest"}), 500
 
 
@@ -91,8 +97,9 @@ def delete_contest(id):
     try:
         result, status = contest_lifecycle.delete_contest(id)
         return jsonify(result), status
+    except HTTPException:
+        raise
     except Exception as e:
+        log_failure("admin.delete_contest", e)
         db.session.rollback()  # エラー時はロールバック
-        print(f"!!! ERROR at DELETE /api/admin/contests/{id}: {e}")
-        traceback.print_exc()
         return jsonify({"error": "大会の削除中にエラーが発生しました。"}), 500

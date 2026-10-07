@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from unittest.mock import Mock
 from sqlalchemy.orm import Query
 
 from app import create_app
@@ -41,7 +42,7 @@ def clock(monkeypatch, read):
     return calls
 
 
-def observe_reads(monkeypatch):
+def observe_reads(monkeypatch, *, allow_rollback=False):
     events = []
     original_all = Query.all
 
@@ -55,7 +56,7 @@ def observe_reads(monkeypatch):
         raise AssertionError("Contest reads must not commit or roll back")
 
     monkeypatch.setattr(db.session, "commit", reject_write)
-    monkeypatch.setattr(db.session, "rollback", reject_write)
+    monkeypatch.setattr(db.session, "rollback", Mock(wraps=db.session.rollback) if allow_rollback else reject_write)
     monkeypatch.setattr(Query, "count", reject_write)
     return events
 
@@ -249,8 +250,8 @@ def test_cache_hit_clock_failure_is_outside_exception_handler(client, monkeypatc
         raise RuntimeError("clock failure")
 
     clock(monkeypatch, fail)
-    with pytest.raises(RuntimeError, match="clock failure"):
-        client.get("/api/contests")
+    response = client.get("/api/contests")
+    assert response.status_code == 500 and response.get_json() == {"error": "Internal server error"}
 
 
 def test_cache_store_clock_failure_keeps_new_payload_and_old_timestamp(client, monkeypatch):
@@ -280,8 +281,8 @@ def test_list_json_failure_is_caught_on_miss_and_propagates_on_hit(client, monke
     assert response.status_code == 500 and response.get_json() == {"error": "Failed"}
     assert query_module.contest_cache()["payload"] == EMPTY
     assert query_module.contest_cache()["time"] == 100
-    with pytest.raises(RuntimeError, match="JSON failure"):
-        client.get("/api/contests")
+    response = client.get("/api/contests")
+    assert response.status_code == 500 and response.get_json() == {"error": "Internal server error"}
 
 
 def test_stale_cache_survives_query_failure(client, monkeypatch):
@@ -310,25 +311,26 @@ def test_detail_clock_reads_and_log_messages_keep_original_order(client, rich_co
 
 @pytest.mark.parametrize("endpoint", ("details", "management"))
 def test_query_failure_keeps_error_response_logs_and_no_rollback(
-    client, rich_contest, user_factory, login, monkeypatch, capsys, endpoint
+    client, rich_contest, user_factory, login, monkeypatch, capsys, caplog, endpoint
 ):
     login(user_factory("test_admin"))
-    observe_reads(monkeypatch)
+    observe_reads(monkeypatch, allow_rollback=True)
 
     def fail(*_args):
         raise RuntimeError("query failure")
 
     if endpoint == "details":
         monkeypatch.setattr(Query, "get", fail)
-        path, status, error = f"/api/contests/{rich_contest.id}", 404, "Contest not found"
+        path, status, error = f"/api/contests/{rich_contest.id}", 500, "Internal server error"
     else:
         monkeypatch.setattr(Query, "all", fail)
         path, status, error = "/api/admin/contests/management", 500, "Failed to fetch contests for management"
     response = client.get(path)
     assert response.status_code == status and response.get_json() == {"error": error}
     output = capsys.readouterr()
-    assert "query failure" in output.out
-    assert ("RuntimeError: query failure" in output.err) == (endpoint == "management")
+    assert "RuntimeError" in caplog.text
+    assert "query failure" not in caplog.text + output.out + output.err
+    assert db.session.rollback.call_count == 1
 
 
 @pytest.mark.parametrize("endpoint", ("details", "management"))
@@ -347,7 +349,7 @@ def test_json_failure_keeps_original_exception_boundary(
     monkeypatch.setattr(module, "jsonify", fail_success)
     path = f"/api/contests/{rich_contest.id}" if endpoint == "details" else "/api/admin/contests/management"
     response = client.get(path)
-    assert response.status_code == (404 if endpoint == "details" else 500)
+    assert response.status_code == 500
 
 
 @pytest.mark.parametrize("authorized", (False, True))

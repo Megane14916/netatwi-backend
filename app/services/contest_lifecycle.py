@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 
 from app.services import policies
+from app.diagnostics import log_failure
+from flask import current_app
 from app.services.transactions import lock_contest
 from app.integrations import cloud_tasks
 
@@ -281,7 +283,7 @@ def delete_contest(id):
     Contest.query.filter_by(id=id).delete()
     db.session.commit()
 
-    print(f"--- Contest Deleted: ID={id} ---")
+    current_app.logger.info("Contest deleted; contest_id=%s", id)
     return ({"message": "大会が正常に削除されました。"}), 200
 
 
@@ -464,6 +466,6 @@ def process_contests():
             print(f"Deleted {deleted_count} old notifications (older than 30 days)")
     except Exception as e:
         db.session.rollback()
-        print(f"Failed to delete old notifications: {e}")
+        log_failure("contest_lifecycle.cleanup_notifications", e)
 
     print("--- process-contests batch completed ---")
