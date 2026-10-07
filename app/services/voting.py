@@ -57,6 +57,8 @@ def submit_votes(
     normalized_votes = {}
     try:
         for pid_str, count_val in votes_to_submit.items():
+            if isinstance(count_val, bool):
+                raise ValueError
             post_id = _normalize_post_id(pid_str)
             if post_id in normalized_votes:
                 raise ValueError
@@ -73,6 +75,8 @@ def submit_votes(
     award_pid = None
     if is_judge_voting_now and judge_award is not None:
         if not isinstance(judge_award, dict):
+            return ({"error": "Invalid judge award"}), 400
+        if judge_award.get("comment") is not None and not isinstance(judge_award["comment"], str):
             return ({"error": "Invalid judge award"}), 400
         award_pid = judge_award.get("postId")
         if type(award_pid) is not int:

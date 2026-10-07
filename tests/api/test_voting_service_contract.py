@@ -197,7 +197,7 @@ def test_post_id_integer_upper_boundary_is_accepted(client, voting, login, kind)
 
 
 @pytest.mark.parametrize("judge,score,expected", [
-    (False, 0, None), (False, 1, 1.0), (False, "1", 1.0), (False, True, 1.0),
+    (False, 0, None), (False, 1, 1.0), (False, "1", 1.0), (False, True, None),
     (False, 0.5, None), (False, 2, None), (False, -1, None), (False, None, None),
     (False, "invalid", None), (True, 0, 0.0), (True, 2.5, 2.5),
     (True, 5, 5.0), (True, 5.01, None), (True, -1, None), (True, "NaN", None),
@@ -354,8 +354,9 @@ def test_text_validation_normalizes_form_and_ignores_json_content(client, app, v
 
 def test_null_json_and_validation_exception_remain_outside_handler(client, voting, monkeypatch):
     _, _, _, _, path = voting
-    with pytest.raises(AttributeError):
-        client.post(path, data="null", content_type="application/json")
+    invalid = client.post(path, data="null", content_type="application/json")
+    assert invalid.status_code == 400
+    assert invalid.get_json() == {"error": "Expected a JSON object"}
 
     def fail_length(_text):
         raise RuntimeError("length failed")

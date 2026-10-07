@@ -29,3 +29,11 @@ create/updateの全フィールドを更新前に検証。name/passwordのDB上�
 frontendはISO日時、number/booleanと有効enumを送るため正常系の調整不要。
 既存の不正値/ゼロ分母/forbiddenの特性テストは意図した契約のみ更新した。
 他APIの入力検証は後続PR。DB schema/migration・本番設定変更なし。
+
+## 投票API
+
+追加17件は修正前11失敗/6成功、修正後関連108件成功。
+JSON objectを要求し、真偽値を点数とする入力と非文字列の審査員賞commentを
+既存投票の削除前に拒否する。点数の数値文字列・小数、nullコメント、0点審査、
+投票対象と点数範囲の先行修正を保持。拒否時は既存投票/投票者・審査員数を保持。
+HTTP: malformed JSON/型不正をJSON 400へ変更。frontendの有効入力は変更不要。
