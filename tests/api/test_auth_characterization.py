@@ -279,9 +279,10 @@ def test_judge_rejections_leave_session_and_database_unchanged(
         assert session["judge_for_contest_ids"] == [9]
 
 
-def test_judge_success_is_idempotent_and_missing_contest_stays_500(
-    client, contest_factory, user_factory, login, monkeypatch, capsys
+def test_judge_success_is_idempotent_and_missing_contest_is_404(
+    client, contest_factory, user_factory, login, monkeypatch, capsys, caplog
 ):
+    caplog.set_level("INFO", logger="app")
     contest = contest_factory(NOW, NOW + timedelta(hours=1), NOW + timedelta(hours=2), judge_password="secret")
     user = user_factory("judge")
     login(user, judge_contests=[9])
@@ -292,27 +293,29 @@ def test_judge_success_is_idempotent_and_missing_contest_stays_500(
         assert response.get_json() == {"redirectUrl": f"/venue/{contest.id}"}
     with client.session_transaction() as session:
         assert session["judge_for_contest_ids"] == [9, contest.id]
-    assert capsys.readouterr().out == (
-        f"--- Judge Login Success: User {user.id} for Contest {contest.id} ---\n"
-        f" -> Current Judge Contests in Session: [9, {contest.id}]\n"
-    ) * 2
+    assert capsys.readouterr().out == ""
+    assert caplog.messages.count(f"Judge login successful; contest_id={contest.id}") == 2
+    assert "Session" not in caplog.text
     missing = client.post("/api/contests/999/judge/login", json={"password": "secret"})
-    assert missing.status_code == 500
-    assert missing.get_json() == {"error": "審査員認証中にエラーが発生しました。"}
+    assert missing.status_code == 404
+    assert missing.get_json() == {"error": "Not Found"}
     assert events == []
 
 
-def test_judge_null_json_keeps_exception_outside_handler(client, user_factory, login):
+def test_judge_null_json_is_400(client, user_factory, login):
     login(user_factory("judge"))
-    with pytest.raises(AttributeError):
-        client.post("/api/contests/1/judge/login", data="null", content_type="application/json")
+    response = client.post("/api/contests/1/judge/login", data="null", content_type="application/json")
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Expected a JSON object"}
 
 
 def test_judge_rate_limit_remains_five_per_minute(
-    client, contest_factory, user_factory, login, capsys
+    client, contest_factory, user_factory, login, capsys, caplog
 ):
+    caplog.set_level("INFO", logger="app")
     contest = contest_factory(NOW, NOW + timedelta(hours=1), NOW + timedelta(hours=2), judge_password="secret")
     login(user_factory("judge"))
     responses = [client.post(f"/api/contests/{contest.id}/judge/login", json={"password": "secret"}) for _ in range(6)]
     assert [response.status_code for response in responses] == [200] * 5 + [429]
-    assert capsys.readouterr().out.count("Judge Login Success") == 5
+    assert capsys.readouterr().out == ""
+    assert caplog.messages.count(f"Judge login successful; contest_id={contest.id}") == 5

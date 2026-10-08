@@ -33,7 +33,7 @@ def get_admin_news():
 
 
 def add_news(tweet_id):
-    if not tweet_id:
+    if not isinstance(tweet_id, str) or not tweet_id:
         return ({"error": "ツイートIDまたはURLは必須です。"}), 400
 
     import re
@@ -41,11 +41,15 @@ def add_news(tweet_id):
     match = re.search(r"status/(\d+)", tweet_id)
     if match:
         tweet_id = match.group(1)
+    if len(tweet_id) > 80:
+        return {"error": "ツイートIDは80文字以内で入力してください。"}, 400
 
     new_news = News(tweet_id=tweet_id)
     db.session.add(new_news)
+    db.session.flush()
+    news_id = new_news.id
     db.session.commit()
-    return ({"message": "ニュースを追加しました。", "id": new_news.id}), 201
+    return ({"message": "ニュースを追加しました。", "id": news_id}), 201
 
 
 def delete_news(id):

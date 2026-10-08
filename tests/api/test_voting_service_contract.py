@@ -197,7 +197,7 @@ def test_post_id_integer_upper_boundary_is_accepted(client, voting, login, kind)
 
 
 @pytest.mark.parametrize("judge,score,expected", [
-    (False, 0, None), (False, 1, 1.0), (False, "1", 1.0), (False, True, 1.0),
+    (False, 0, None), (False, 1, 1.0), (False, "1", 1.0), (False, True, None),
     (False, 0.5, None), (False, 2, None), (False, -1, None), (False, None, None),
     (False, "invalid", None), (True, 0, 0.0), (True, 2.5, 2.5),
     (True, 5, 5.0), (True, 5.01, None), (True, -1, None), (True, "NaN", None),
@@ -352,17 +352,18 @@ def test_text_validation_normalizes_form_and_ignores_json_content(client, app, v
     assert rejected.get_json() == {"error": "Text too long (max 280)"}
 
 
-def test_null_json_and_validation_exception_remain_outside_handler(client, voting, monkeypatch):
+def test_null_json_is_400_and_unexpected_validation_failure_is_500(client, voting, monkeypatch):
     _, _, _, _, path = voting
-    with pytest.raises(AttributeError):
-        client.post(path, data="null", content_type="application/json")
+    invalid = client.post(path, data="null", content_type="application/json")
+    assert invalid.status_code == 400
+    assert invalid.get_json() == {"error": "Expected a JSON object"}
 
     def fail_length(_text):
         raise RuntimeError("length failed")
 
     monkeypatch.setattr(voting_service, "calculate_weighted_length", fail_length)
-    with pytest.raises(RuntimeError, match="length failed"):
-        client.post(path, json={"votes": {}})
+    response = client.post(path, json={"votes": {}})
+    assert response.status_code == 500 and response.get_json() == {"error": "Internal server error"}
 
 
 @pytest.mark.parametrize("failure", ["missing", "award_type", "award_string_id", "commit"])
@@ -397,15 +398,16 @@ def test_failure_rolls_back_replacement_and_preserves_counters(
     with caplog.at_level(logging.INFO, logger="app"):
         response = client.post(path, json=payload)
     invalid = failure in ("award_type", "award_string_id")
-    assert response.status_code == (400 if invalid else 500)
-    assert response.get_json() == ({"error": "Invalid judge award"} if invalid else {"error": "Error"})
-    assert events == ([] if invalid else ["commit", "rollback"] if failure == "commit" else ["rollback"])
+    assert response.status_code == (400 if invalid else 404 if failure == "missing" else 500)
+    assert response.get_json() == ({"error": "Invalid judge award"} if invalid else {"error": "Not Found"} if failure == "missing" else {"error": "Error"})
+    assert events == (["commit", "rollback"] if failure == "commit" else [])
     vote = Vote.query.one()
     assert (vote.count, vote.is_judge_vote, vote.is_judge_award, vote.judge_comment) == (1, False, False, None)
     assert counts(contest) == (1, 0)
-    if not invalid:
-        assert "==> [submit_votes] ERROR in " in caplog.messages[-1]
-        assert capsys.readouterr().out.startswith("Error: ")
+    if failure == "commit":
+        assert "voting.submit_votes" in caplog.messages[-1] and "RuntimeError" in caplog.messages[-1]
+        assert "commit failed" not in caplog.text
+    assert capsys.readouterr().out == ""
 
 
 def test_database_operation_order_and_log_messages(client, voting, login, monkeypatch, caplog):

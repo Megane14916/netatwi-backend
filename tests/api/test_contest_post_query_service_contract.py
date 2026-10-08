@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from unittest.mock import Mock
 from sqlalchemy.orm import Query
 
 from app.routes import posts as routes
@@ -37,7 +38,7 @@ def clock(monkeypatch, read):
     return calls
 
 
-def observe_reads(monkeypatch):
+def observe_reads(monkeypatch, *, allow_rollback=False):
     events = []
     original = Query.all
 
@@ -51,7 +52,7 @@ def observe_reads(monkeypatch):
     monkeypatch.setattr(Query, "all", read)
     monkeypatch.setattr(Query, "count", reject)
     monkeypatch.setattr(db.session, "commit", reject)
-    monkeypatch.setattr(db.session, "rollback", reject)
+    monkeypatch.setattr(db.session, "rollback", Mock(wraps=db.session.rollback) if allow_rollback else reject)
     return events
 
 
@@ -150,12 +151,12 @@ def test_empty_contest_still_uses_stored_counter_and_queries(client, entries, lo
     assert reads == (["Post", "Vote", "Comment"] if signed_in else ["Post"])
 
 
-def test_missing_contest_keeps_500_and_skips_post_query(client, monkeypatch, capsys):
+def test_missing_contest_is_404_and_skips_post_query(client, monkeypatch, capsys):
     reads = observe_reads(monkeypatch)
     response = client.get("/api/contests/987654/posts")
-    assert response.status_code == 500 and response.get_json() == {"error": "Failed to fetch posts"}
+    assert response.status_code == 404 and response.get_json() == {"error": "Not Found"}
     assert reads == []
-    assert "!!! ERROR at GET /api/contests/987654/posts: 404 Not Found" in capsys.readouterr().out
+    assert capsys.readouterr().out == ""
 
 
 def test_fractional_vote_and_nullable_comment_are_returned_without_judge_session(client, entries, login):
@@ -214,9 +215,9 @@ def test_clock_logs_and_session_read_order(client, entries, login, monkeypatch, 
 
 
 @pytest.mark.parametrize("stage", ("contest", "Post", "Vote", "Comment", "log", "format", "session", "json"))
-def test_failures_keep_500_print_and_no_rollback(client, entries, login, monkeypatch, capsys, stage):
+def test_failures_return_500_with_safe_logs_and_rollback(client, entries, login, monkeypatch, capsys, caplog, stage):
     login(entries.reader)
-    observe_reads(monkeypatch)
+    observe_reads(monkeypatch, allow_rollback=True)
 
     def fail(*_args, **_kwargs):
         raise RuntimeError("listing failure")
@@ -233,7 +234,7 @@ def test_failures_keep_500_print_and_no_rollback(client, entries, login, monkeyp
 
         monkeypatch.setattr(Query, "all", query_failure)
     elif stage == "log":
-        monkeypatch.setattr(current_app._get_current_object(), "logger", SimpleNamespace(info=fail))
+        monkeypatch.setattr(current_app._get_current_object(), "logger", SimpleNamespace(info=fail, error=current_app.logger.error))
     elif stage == "format":
         monkeypatch.setattr(Post, "images", property(fail))
     elif stage == "session":
@@ -249,7 +250,9 @@ def test_failures_keep_500_print_and_no_rollback(client, entries, login, monkeyp
         monkeypatch.setattr(routes, "jsonify", encode)
     response = client.get(f"/api/contests/{entries.c.id}/posts")
     assert response.status_code == 500 and response.get_json() == {"error": "Failed to fetch posts"}
-    assert f"!!! ERROR at GET /api/contests/{entries.c.id}/posts: listing failure" in capsys.readouterr().out
+    assert "posts.get_posts_for_contest" in caplog.text and "RuntimeError" in caplog.text
+    assert "listing failure" not in caplog.text + capsys.readouterr().out
+    assert db.session.rollback.call_count == 1
 
 
 @pytest.mark.parametrize("index", range(7))
@@ -266,14 +269,15 @@ def test_clock_failure_exception_boundary(client, entries, login, monkeypatch, i
         return current
 
     calls = clock(monkeypatch, read)
-    observe_reads(monkeypatch)
+    observe_reads(monkeypatch, allow_rollback=True)
     if index == 0:
-        with pytest.raises(RuntimeError, match="clock failure"):
-            client.get(f"/api/contests/{entries.c.id}/posts")
+        response = client.get(f"/api/contests/{entries.c.id}/posts")
+        assert response.status_code == 500 and response.get_json() == {"error": "Internal server error"}
     else:
         response = client.get(f"/api/contests/{entries.c.id}/posts")
         assert response.status_code == 500 and response.get_json() == {"error": "Failed to fetch posts"}
     assert len(calls) == index + 1
+    assert db.session.rollback.call_count == 1
 
 
 def test_listing_is_fresh_without_cache(client, entries):

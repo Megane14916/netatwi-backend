@@ -7,6 +7,7 @@ and retains HTTP responses and the exception/rollback boundary.
 import time
 from datetime import datetime, timezone
 
+from app.services import policies
 from app.services.text import calculate_weighted_length
 from flask import current_app
 from app.extensions import db
@@ -48,11 +49,7 @@ def submit_votes(
     t1 = time.time()
     current_app.logger.info(f"==> [submit_votes] get_or_404 took: {t1 - t0:.4f}s")
     now = datetime.now(timezone.utc)
-    if not (
-        c.end_time.replace(tzinfo=timezone.utc)
-        <= now
-        < c.voting_end_time.replace(tzinfo=timezone.utc)
-    ):
+    if not policies.in_period(now, c.end_time, c.voting_end_time):
         return ({"error": "Outside period"}), 403
 
     # Validate every target and score before replacing any existing rows.
@@ -60,6 +57,8 @@ def submit_votes(
     normalized_votes = {}
     try:
         for pid_str, count_val in votes_to_submit.items():
+            if isinstance(count_val, bool):
+                raise ValueError
             post_id = _normalize_post_id(pid_str)
             if post_id in normalized_votes:
                 raise ValueError
@@ -76,6 +75,8 @@ def submit_votes(
     award_pid = None
     if is_judge_voting_now and judge_award is not None:
         if not isinstance(judge_award, dict):
+            return ({"error": "Invalid judge award"}), 400
+        if judge_award.get("comment") is not None and not isinstance(judge_award["comment"], str):
             return ({"error": "Invalid judge award"}), 400
         award_pid = judge_award.get("postId")
         if type(award_pid) is not int:

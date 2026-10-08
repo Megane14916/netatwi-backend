@@ -1,7 +1,10 @@
 """User directory queries and withdrawal with original dependency timing."""
 
-from datetime import datetime, timedelta, timezone
+from app.services.serialization import public_user
+
+from datetime import datetime, timezone
 from sqlalchemy.orm import joinedload
+from app.services.transactions import rollback_on_failure
 from app.extensions import db
 from app.models import User
 
@@ -37,11 +40,8 @@ def get_users_list(search_query, page, User, UserStats, asc):
         stats = user.stats
         users_data.append(
             {
-                "id": user.id,
+                **public_user(user, include_id=True),
                 "twitter_id": user.twitter_id,
-                "name": user.name,
-                "screen_name": user.screen_name,
-                "profile_image_url": user.profile_image_url,
                 "stats": {
                     "gp_1st": stats.gp_1st if stats else 0,
                     "gp_2nd": stats.gp_2nd if stats else 0,
@@ -66,6 +66,7 @@ def get_users_list(search_query, page, User, UserStats, asc):
     ), 200
 
 
+@rollback_on_failure
 def withdraw_user(user_id):
     user = User.query.get(user_id)
     if not user:

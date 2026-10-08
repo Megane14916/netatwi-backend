@@ -124,16 +124,9 @@ def authenticate_judge(id, password):
         session.modified = True
         # --- ▲▲▲ ここまで ▲▲▲ ---
 
-        print(
-            f"--- Judge Login Success: User {session.get('user_id')} for Contest {id} ---"
-        )
-        print(
-            f" -> Current Judge Contests in Session: {session['judge_for_contest_ids']}"
-        )
+        current_app.logger.info("Judge login successful; contest_id=%s", id)
 
         return "authenticated"
     else:
-        print(
-            f"--- Judge Login Failed: User {session.get('user_id')} for Contest {id} ---"
-        )
+        current_app.logger.info("Judge login rejected; contest_id=%s", id)
         return "invalid_password"

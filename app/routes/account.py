@@ -1,9 +1,8 @@
 """Current session, logout and withdrawal routes."""
 
-import os
-
 from flask import jsonify, session
 from app.services import users as user_service
+from app.services import policies
 from flask import Blueprint
 
 
@@ -13,21 +12,14 @@ bp = Blueprint("account", __name__)
 @bp.route("/api/me")
 def get_current_user():
     user_data = {"logged_in": False}
-    if "user_id" in session:
+    if policies.is_authenticated(session):
         user_data["logged_in"] = True
         user_data["user"] = {
             "id": session["user_id"],
             "screen_name": session["screen_name"],
             "name": session.get("name"),
             "profile_image_url": session.get("profile_image_url"),
-            "isAdmin": session["screen_name"]
-            in [
-                s.strip()
-                for s in os.environ.get(
-                    "ADMIN_SCREEN_NAMES", "dummy_admin1,dummy_admin2"
-                ).split(",")
-                if s.strip()
-            ],
+            "isAdmin": policies.is_admin(session),
         }
         # --- ▼▼▼ set ではなく list を使うように修正 ▼▼▼ ---
         # セッションから 'judge_for_contest_ids' をリストとして取得 (なければ空のリスト)
@@ -45,7 +37,7 @@ def logout():
 
 @bp.route("/api/users/me", methods=["DELETE"])
 def withdraw_user():
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
 
     user_id = session["user_id"]

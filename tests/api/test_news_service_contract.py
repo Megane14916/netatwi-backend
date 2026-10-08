@@ -114,24 +114,24 @@ def test_missing_or_falsy_id_returns_400_without_import_or_transaction(client, a
 
 
 @pytest.mark.parametrize("value", (123, True, [123], {"id": 123}))
-def test_truthy_nonstring_id_keeps_regex_failure_and_rollback(client, admin, monkeypatch, capsys, value):
+def test_truthy_nonstring_id_returns_400_before_regex_or_mutations(client, admin, monkeypatch, capsys, value):
     events = transactions(monkeypatch)
     imports = regex_imports(monkeypatch)
     response = client.post("/api/admin/news", json={"tweet_id": value})
-    assert response.status_code == 500 and response.get_json() == ADD_ERROR
-    assert events == ["rollback"] and imports == ["re"] and News.query.count() == 0
-    assert "!!! ERROR at POST /api/admin/news:" in capsys.readouterr().out
+    assert response.status_code == 400 and response.get_json() == MISSING
+    assert events == [] and imports == [] and News.query.count() == 0
+    assert capsys.readouterr().out == ""
 
 
 @pytest.mark.parametrize("body, content_type", [('null', "application/json"), ('[]', "application/json"),
                                               ('"text"', "application/json"), ('{', "application/json"),
                                               ("tweet_id=123", "text/plain"), ("", "application/json")])
-def test_invalid_http_input_is_caught_and_rolled_back(client, admin, monkeypatch, body, content_type):
+def test_invalid_http_input_is_400_without_mutations(client, admin, monkeypatch, body, content_type):
     events = transactions(monkeypatch)
     imports = regex_imports(monkeypatch)
     response = client.post("/api/admin/news", data=body, content_type=content_type)
-    assert response.status_code == 500 and response.get_json() == ADD_ERROR
-    assert events == ["rollback"] and imports == [] and News.query.count() == 0
+    assert response.status_code == 400 and response.get_json() == {"error": "Expected a JSON object"}
+    assert events == [] and imports == [] and News.query.count() == 0
 
 
 def test_duplicate_additions_remain_allowed(client, admin, monkeypatch):
@@ -174,7 +174,7 @@ def test_auth_precedes_json_and_news_queries_and_requires_active_user(client, mo
         expected = status
     elif action == "add":
         response = client.post("/api/admin/news", data="{", content_type="application/json")
-        expected = 500 if status == 200 else status
+        expected = 400 if status == 200 else status
     else:
         response = client.delete("/api/admin/news/987654")
         expected = 404 if status == 200 else status
@@ -183,7 +183,7 @@ def test_auth_precedes_json_and_news_queries_and_requires_active_user(client, mo
         assert response.get_json() == {"error": "Login required" if status == 401 else "Forbidden: Admins only"}
         assert events == [] and reads == []
     else:
-        assert events == (["rollback"] if action == "add" else [])
+        assert events == []
         assert reads == (["all"] if action == "list" else ["get"] if action == "delete" else [])
 
 
@@ -205,7 +205,7 @@ def test_default_empty_and_case_sensitive_admin_settings(client, monkeypatch, us
 
 @pytest.mark.parametrize("path", ("/api/news", "/api/admin/news"))
 @pytest.mark.parametrize("stage", ("query", "format", "json"))
-def test_list_failures_keep_500_print_without_rollback(client, admin, saved_news, monkeypatch, capsys, path, stage):
+def test_list_failures_return_500_with_safe_logs_and_rollback(client, admin, saved_news, monkeypatch, capsys, caplog, path, stage):
     events = transactions(monkeypatch)
 
     def fail(*_args, **_kwargs):
@@ -227,8 +227,9 @@ def test_list_failures_keep_500_print_without_rollback(client, admin, saved_news
     response = client.get(path)
     assert response.status_code == 500 and response.get_json() == {"error": "ニュースの取得に失敗しました。"}
     output = capsys.readouterr()
-    assert f"!!! ERROR at GET {path}: list failure" in output.out and output.err == ""
-    assert events == []
+    assert "RuntimeError" in caplog.text and "news.get_" in caplog.text
+    assert "list failure" not in caplog.text + output.out + output.err
+    assert events == ["rollback"]
 
 
 def test_delete_then_repeat_preserves_not_found_without_second_transaction(client, admin, saved_news, monkeypatch):
@@ -245,7 +246,7 @@ def test_delete_then_repeat_preserves_not_found_without_second_transaction(clien
 @pytest.mark.parametrize("action, stage", [("add", "add"), ("add", "commit"), ("delete", "get"),
                                          ("delete", "delete"), ("delete", "commit"),
                                          ("add", "json"), ("delete", "json")])
-def test_write_failures_keep_transaction_order_and_partial_commit(client, admin, saved_news, monkeypatch, capsys, action, stage):
+def test_write_failures_keep_transaction_order_and_partial_commit(client, admin, saved_news, monkeypatch, capsys, caplog, action, stage):
     ident = saved_news.id
     events = transactions(monkeypatch)
 
@@ -286,11 +287,11 @@ def test_write_failures_keep_transaction_order_and_partial_commit(client, admin,
     assert rows == ({"existing", "new"} if action == "add" and stage == "json"
                     else set() if action == "delete" and stage == "json" else {"existing"})
     output = capsys.readouterr()
-    assert f"!!! ERROR at {'POST' if action == 'add' else 'DELETE'} {path}: write failure" in output.out
-    assert output.err == ""
+    assert "RuntimeError" in caplog.text and "news." in caplog.text
+    assert "write failure" not in caplog.text + output.out + output.err
 
 
-def test_post_commit_id_refresh_failure_cannot_undo_addition(client, admin, monkeypatch):
+def test_addition_returns_captured_id_without_post_commit_refresh(client, admin, monkeypatch):
     events = transactions(monkeypatch)
     original_commit = db.session.commit
     committed = False
@@ -310,13 +311,14 @@ def test_post_commit_id_refresh_failure_cannot_undo_addition(client, admin, monk
         response = client.post("/api/admin/news", json={"tweet_id": "123"})
     finally:
         event.remove(db.engine, "before_cursor_execute", fail_refresh)
-    assert response.status_code == 500 and response.get_json() == ADD_ERROR
-    assert events == ["add", "commit", "rollback"]
+    assert response.status_code == 201
+    assert isinstance(response.get_json()["id"], int)
+    assert events == ["add", "commit"]
     assert [row.tweet_id for row in News.query.all()] == ["123"]
 
 
 @pytest.mark.parametrize("action", ("add", "delete"))
-def test_rollback_failure_propagates_out_of_original_except(client, admin, saved_news, monkeypatch, action):
+def test_rollback_failure_uses_common_500_handler(client, admin, saved_news, monkeypatch, action):
     ident = saved_news.id
     events = []
 
@@ -330,12 +332,10 @@ def test_rollback_failure_propagates_out_of_original_except(client, admin, saved
 
     monkeypatch.setattr(db.session, "commit", commit)
     monkeypatch.setattr(db.session, "rollback", rollback)
-    with pytest.raises(RuntimeError, match="rollback failure"):
-        if action == "add":
-            client.post("/api/admin/news", json={"tweet_id": "123"})
-        else:
-            client.delete(f"/api/admin/news/{ident}")
-    assert events == ["commit", "rollback"]
+    response = (client.post("/api/admin/news", json={"tweet_id": "123"}) if action == "add"
+                else client.delete(f"/api/admin/news/{ident}"))
+    assert response.status_code == 500 and response.get_json() == {"error": "Internal server error"}
+    assert events == ["commit", "rollback", "rollback"]
 
 
 @pytest.mark.parametrize("action", ("add", "delete"))

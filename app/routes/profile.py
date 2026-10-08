@@ -1,6 +1,9 @@
 """Public profile route."""
 
-import traceback
+from werkzeug.exceptions import HTTPException
+from app.diagnostics import log_failure
+from app.extensions import db
+
 
 from flask import jsonify, session
 
@@ -21,7 +24,9 @@ def get_user_profile_updated(screen_name):
         payload, status = profile_service.get_user_profile(screen_name, viewer_id, log_step)
         return jsonify(payload), status
 
+    except HTTPException:
+        raise
     except Exception as e:
-        print(e)
-        traceback.print_exc()
+        db.session.rollback()
+        log_failure("profile.get_user_profile_updated", e)
         return jsonify({"error": "Error"}), 500

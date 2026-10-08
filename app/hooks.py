@@ -1,12 +1,15 @@
 """Shared request hooks and error responses."""
 
 from flask import current_app
+from werkzeug.exceptions import HTTPException
+from app.diagnostics import log_failure
 
 
 from flask import jsonify, request, session
 
 from app.extensions import db
 from app.models import User
+from app.services.validation import InputError
 
 
 
@@ -53,7 +56,30 @@ def add_cache_control_headers(response):
     return response
 
 
+def invalid_input(error):
+    return jsonify({"error": str(error)}), 400
+
+
+def http_error(error):
+    response = error.get_response()
+    response.set_data(jsonify({"error": error.name}).get_data())
+    response.content_type = "application/json"
+    return response
+
+
+def unexpected_error(error):
+    log_failure(request.endpoint or "request", error)
+    try:
+        db.session.rollback()
+    except Exception as rollback_error:
+        log_failure("request.rollback", rollback_error)
+    return jsonify({"error": "Internal server error"}), 500
+
+
 def register_hooks(app):
+    app.register_error_handler(HTTPException, http_error)
+    app.register_error_handler(Exception, unexpected_error)
+    app.register_error_handler(InputError, invalid_input)
     app.register_error_handler(413, request_entity_too_large)
     app.before_request(invalidate_stale_user_session)
     app.before_request(log_request_info)

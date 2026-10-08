@@ -1,13 +1,13 @@
 """Contest post queries and viewer display data with original read ordering."""
 
+from app.services.serialization import post_submission
+
 from flask import current_app
 
-from datetime import timedelta, timezone
 
 from app.models import Contest, Post, Vote
 
 
-JST = timezone(timedelta(hours=9), "JST")
 
 
 def get_posts_for_listing(id, start_time, time):
@@ -61,14 +61,8 @@ def get_posts_for_contest(id, c, posts, user_id, t2, start_time, time):
         my_vote = user_votes_map.get(post.id, {})
         posts_data.append(
             {
-                "id": post.id,
-                "content": post.content,
-                "created_at": post.created_at.replace(tzinfo=timezone.utc)
-                .astimezone(JST)
-                .isoformat(),
-                "user_id": post.user_id,
+                **post_submission(post),
                 "myVotes": user_votes.get(post.id, None),
-                "images": post.images,
                 "myJudgeAward": my_vote.get("is_judge_award", False),
                 "myJudgeComment": my_vote.get("judge_comment", None),
                 "hasCommented": post.id in user_commented_post_ids,

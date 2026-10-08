@@ -1,18 +1,23 @@
 """Contest post listing and CRUD routes."""
 
+from app.services.serialization import post_submission
+
+from werkzeug.exceptions import HTTPException
+from app.diagnostics import log_failure
+
 import json
-from datetime import timedelta, timezone
 
 from flask import jsonify, request, session
 
 from app.extensions import db
 from app.services import posts as post_service
 from app.services import contest_posts as contest_post_service
+from app.services import policies
+from app.services.validation import json_object
 from flask import Blueprint
 
 
 bp = Blueprint("posts", __name__)
-JST = timezone(timedelta(hours=9), "JST")
 
 
 @bp.route("/api/contests/<int:id>/posts")
@@ -26,14 +31,17 @@ def get_posts_for_contest(id):
         return jsonify(
             contest_post_service.get_posts_for_contest(id, c, posts, user_id, t2, start_time, time)
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"!!! ERROR at GET /api/contests/{id}/posts: {e}")
+        db.session.rollback()
+        log_failure("posts.get_posts_for_contest", e)
         return jsonify({"error": "Failed to fetch posts"}), 500
 
 
 @bp.route("/api/contests/<int:id>/posts", methods=["POST"])
 def submit_post(id):
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
     user_id = session["user_id"]
 
@@ -52,35 +60,27 @@ def submit_post(id):
             return jsonify(result), status
         new_post = result
 
-        return jsonify(
-            {
-                "id": new_post.id,
-                "content": new_post.content,
-                "images": new_post.images,
-                "created_at": new_post.created_at.replace(tzinfo=timezone.utc)
-                .astimezone(JST)
-                .isoformat(),
-                "user_id": new_post.user_id,
-            }
-        ), 201
+        return jsonify(post_submission(new_post)), 201
 
+    except HTTPException:
+        raise
     except Exception as e:
+        log_failure("posts.submit_post", e)
         db.session.rollback()
-        print(f"Error: {e}")
         return jsonify({"error": "Error"}), 500
 
 
 @bp.route("/api/contests/<int:contest_id>/posts/<int:post_id>", methods=["PUT"])
 def update_post(contest_id, post_id):
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
     user_id = session["user_id"]
 
     new_content = None
 
     # JSONとFormDataの判別
-    if request.content_type and request.content_type.startswith("application/json"):
-        data = request.get_json()
+    if request.is_json:
+        data = json_object()
         new_content = data.get("content")
         kept_images = data.get("kept_images", [])
         files = []
@@ -89,7 +89,7 @@ def update_post(contest_id, post_id):
         kept_images_str = request.form.get("kept_images", "[]")
         try:
             kept_images = json.loads(kept_images_str)
-        except:
+        except json.JSONDecodeError:
             return jsonify({"error": "Invalid kept images"}), 400
         files = request.files.getlist("images")
 
@@ -107,31 +107,29 @@ def update_post(contest_id, post_id):
 
         return jsonify(
             {
-                "id": post_to_edit.id,
-                "content": post_to_edit.content,
-                "images": post_to_edit.images,
-                "created_at": post_to_edit.created_at.replace(tzinfo=timezone.utc)
-                .astimezone(JST)
-                .isoformat(),
-                "user_id": post_to_edit.user_id,
+                **post_submission(post_to_edit),
                 "myVotes": None,
             }
         ), 200
+    except HTTPException:
+        raise
     except Exception as e:
+        log_failure("posts.update_post", e)
         db.session.rollback()
-        print(e)
         return jsonify({"error": "Error"}), 500
 
 
 @bp.route("/api/contests/<int:contest_id>/posts/<int:post_id>", methods=["DELETE"])
 def delete_post(contest_id, post_id):
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
     user_id = session["user_id"]
     try:
         result, status = post_service.delete_post(contest_id, post_id, user_id)
         return jsonify(result), status
+    except HTTPException:
+        raise
     except Exception as e:
+        log_failure("posts.delete_post", e)
         db.session.rollback()
-        print(e)
         return jsonify({"error": "Error"}), 500

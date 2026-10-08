@@ -1,13 +1,16 @@
 """Profile queries, visibility and presentation with original result reuse."""
 
-from datetime import datetime, timedelta, timezone
+from app.services.serialization import public_user, post_content
+
+from datetime import datetime, timezone
+from flask import current_app
 from sqlalchemy.orm import joinedload
+from app.services import policies
 from app.extensions import db
 from app.models import Bookmark, Post, User, Vote
 from app.services import results as results_service
 
 
-JST = timezone(timedelta(hours=9), "JST")
 
 
 def prepare_profile_timing(time):
@@ -17,7 +20,7 @@ def prepare_profile_timing(time):
     def log_step(step_name):
         nonlocal perf_prev_time
         curr = time.time()
-        print(
+        current_app.logger.info(
             f"PROFILE_PERF_LOG: [{step_name}] took {curr - perf_prev_time:.4f}s (Total: {curr - perf_start_time:.4f}s)"
         )
         perf_prev_time = curr
@@ -68,7 +71,7 @@ def get_user_profile(screen_name, viewer_id, log_step):
     def filter_posts(raw_posts):
         valid = []
         for p in raw_posts:
-            if now >= p.contest.voting_end_time.replace(tzinfo=timezone.utc):
+            if policies.has_reached(now, p.contest.voting_end_time):
                 valid.append(p)
         return valid
 
@@ -171,22 +174,14 @@ def get_user_profile(screen_name, viewer_id, log_step):
             formatted.append(
                 {
                     "post_id": post.id,
-                    "content": post.content,
-                    "images": post.images,
-                    "created_at": post.created_at.replace(tzinfo=timezone.utc)
-                    .astimezone(JST)
-                    .isoformat(),
+                    **post_content(post),
                     "contest": {
                         "id": post.contest.id,
                         "name": post.contest.name,
                         "theme": post.contest.theme,
                         "scoringMethod": post.contest.scoring_method,
                     },
-                    "user": {
-                        "screen_name": post.user.screen_name,
-                        "name": post.user.name,
-                        "profile_image_url": post.user.profile_image_url,
-                    },
+                    "user": public_user(post.user),
                     "rank": res["rank"] if res else None,
                     "score": res["score"] if res else 0,
                     "bookmarkCount": post.bookmark_count,
@@ -200,12 +195,7 @@ def get_user_profile(screen_name, viewer_id, log_step):
         return formatted
 
     res_json = {
-        "user": {
-            "id": target_user.id,
-            "screen_name": target_user.screen_name,
-            "name": target_user.name,
-            "profile_image_url": target_user.profile_image_url,
-        },
+        "user": public_user(target_user, include_id=True),
         "posts": format_posts_fast(valid_user_posts),
         "bookmarks": format_posts_fast(valid_bookmarks),
         "likes": format_posts_fast(valid_likes),

@@ -222,7 +222,7 @@ def test_edit_owner_check_precedes_bad_json(client, comment_case, login, user_fa
 @pytest.mark.parametrize("body, exception", [(None, AttributeError), ([], AttributeError),
                                            ({"content": None}, AttributeError),
                                            ({"content": 123}, AttributeError)])
-def test_invalid_json_shapes_keep_existing_exception_boundary(
+def test_invalid_json_shapes_return_400_without_writes(
     client, comment_case, login, monkeypatch, method, body, exception
 ):
     post, owner, _ = comment_case
@@ -235,8 +235,9 @@ def test_invalid_json_shapes_keep_existing_exception_boundary(
     # json=None would omit the JSON body in Flask's test client.
     import json
 
-    with pytest.raises(exception):
-        client.open(path, method=method, data=json.dumps(body), content_type="application/json")
+    response = client.open(path, method=method, data=json.dumps(body), content_type="application/json")
+    assert response.status_code == 400
+    assert "error" in response.get_json()
     assert writes == []
 
 
@@ -292,7 +293,7 @@ def test_delete_keeps_existing_negative_counter_behavior(client, comment_case, l
 
 
 @pytest.mark.parametrize("method", ("POST", "PUT", "DELETE"))
-def test_commit_failure_propagates_without_added_rollback(
+def test_commit_failure_returns_json_and_rolls_back(
     client, comment_case, login, fixed_time, monkeypatch, method
 ):
     post, owner, _ = comment_case
@@ -313,12 +314,11 @@ def test_commit_failure_propagates_without_added_rollback(
         raise RuntimeError("commit failure")
 
     monkeypatch.setattr(db.session, "commit", fail_commit)
-    with pytest.raises(RuntimeError, match="commit failure"):
-        client.open(path, method=method, json={"content": "Changed"})
+    response = client.open(path, method=method, json={"content": "Changed"})
+    assert response.status_code == 500 and response.get_json() == {"error": "Internal server error"}
     assert writes == (["add Comment", "commit failure"] if method == "POST"
                       else ["delete Comment", "commit failure"] if method == "DELETE"
-                      else ["commit failure"])
-    db.session.rollback()
+                      else ["commit failure"]) + ["rollback", "rollback"]
     assert Comment.query.count() == (0 if method == "POST" else 1)
     assert post.comment_count == (0 if method == "POST" else 1)
     if method != "POST":

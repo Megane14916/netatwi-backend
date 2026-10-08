@@ -51,10 +51,10 @@ def test_create_validation_precedes_missing_contest(client, entry, data, error):
     assert response.get_json() == {"error": error}
 
 
-def test_missing_contest_is_caught_as_generic_error(client, entry):
+def test_missing_contest_is_json_404(client, entry):
     response = client.post("/api/contests/999/posts", data={"content": "text"})
-    assert response.status_code == 500
-    assert response.get_json() == {"error": "Error"}
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Not Found"}
 
 
 @pytest.mark.parametrize("rule,filename,expected", [

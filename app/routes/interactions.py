@@ -1,12 +1,15 @@
 """Bookmark and like routes."""
 
-import traceback
+from werkzeug.exceptions import HTTPException
+from app.diagnostics import log_failure
+
 
 from flask import jsonify, request, session
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.services import interactions as interaction_service
+from app.services import policies
 from flask import Blueprint
 
 
@@ -15,7 +18,7 @@ bp = Blueprint("interactions", __name__)
 
 @bp.route("/api/posts/<int:post_id>/bookmark", methods=["PUT", "DELETE"])
 def set_bookmark(post_id):
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "ログインが必要です。"}), 401
     user_id = session["user_id"]
     try:
@@ -34,16 +37,17 @@ def set_bookmark(post_id):
             if recovered is not None:
                 return jsonify(recovered[0]), recovered[1]
         return jsonify({"error": "ブックマーク処理中にエラーが発生しました。"}), 500
+    except HTTPException:
+        raise
     except Exception as e:
+        log_failure("interactions.set_bookmark", e)
         db.session.rollback()
-        print(f"!!! ERROR at POST /api/posts/{post_id}/bookmark: {e}")
-        traceback.print_exc()
         return jsonify({"error": "ブックマーク処理中にエラーが発生しました。"}), 500
 
 
 @bp.route("/api/posts/<int:post_id>/like", methods=["PUT", "DELETE"])
 def set_like(post_id):
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
     user_id = session["user_id"]
 
@@ -60,7 +64,9 @@ def set_like(post_id):
         # Return the resulting state instead of exposing a 500 to the client.
         result, status = interaction_service.recover_like(post_id, user_id)
         return jsonify(result), status
+    except HTTPException:
+        raise
     except Exception as e:
+        log_failure("interactions.set_like", e)
         db.session.rollback()
-        print(f"Error toggling like: {e}")
         return jsonify({"error": "いいね処理中にエラーが発生しました。"}), 500

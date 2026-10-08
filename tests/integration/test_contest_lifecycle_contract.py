@@ -88,7 +88,7 @@ def test_create_fields_parent_link_and_schedule_order(client, admin, monkeypatch
         assert (q.name, q.theme, q.has_theme, q.has_qualifier, q.scoring_method, q.image_rule,
                 q.general_vote_weight, q.judge_max_score, q.judge_password, q.is_voting_visible,
                 q.advancement_numerator, q.advancement_denominator, q.judge_award_advancement) == (
-                    "Contest 予選", "Qualifier theme", True, False, "user", "forbidden",
+                    "Contest 予選", "Qualifier theme", True, False, "user", "none",
                     60, 15, "q-secret", False, 1, 3, True)
         assert contest.advancement_numerator is contest.advancement_denominator is None
         expected_ids = [q.id, contest.id]
@@ -119,9 +119,9 @@ def test_qualifier_explicit_times_and_default_fields(client, admin, monkeypatch)
 def test_create_invalid_input_rolls_back_without_scheduling(client, admin, monkeypatch, payload):
     effects = observe_admin_effects(monkeypatch)
     response = client.post("/api/admin/contests", json=payload)
-    assert response.status_code == 500
-    assert response.get_json() == {"error": "Failed to create contest"}
-    assert effects == ["rollback"]
+    assert response.status_code == 400
+    assert response.get_json()["error"].startswith("Invalid field:")
+    assert effects == []
     assert Contest.query.count() == 0
 
 
@@ -146,7 +146,7 @@ def test_update_all_fields_flags_alias_precedence_and_reschedule(client, admin, 
                               notified_result_announce=True)
     effects = observe_admin_effects(monkeypatch)
     data = dict(PAYLOAD, name="Updated", theme="Dropped without hasTheme", type="daily", scoringMethod="user",
-                imageRule="forbidden", isVotingVisible=False, advancementNumerator=0, advancementDenominator="0",
+                imageRule="forbidden", isVotingVisible=False, advancementNumerator=0, advancementDenominator="1",
                 generalVoteWeight="80", judgeMaxScore="12", judgePassword="new", resultCommentTop="Top",
                 resultCommentBottom="Bottom", judgeAwardAdvancement=True, qualifierJudgeAwardAdvancement=False,
                 startTime="2026-01-02T12:00:00Z", endTime="2026-01-02T13:00:00Z", votingEndTime="2026-01-02T14:00:00Z")
@@ -158,7 +158,7 @@ def test_update_all_fields_flags_alias_precedence_and_reschedule(client, admin, 
             contest.is_voting_visible, contest.advancement_numerator, contest.advancement_denominator,
             contest.general_vote_weight, contest.judge_max_score, contest.judge_password, contest.result_comment_top,
             contest.result_comment_bottom, contest.judge_award_advancement) == (
-                "Updated", None, True, "daily", "user", "forbidden", False, None, 0, 80, 12, "new", "Top", "Bottom", False)
+                "Updated", None, True, "daily", "user", "none", False, None, 1, 80, 12, "new", "Top", "Bottom", False)
     assert contest.notified_post_start and contest.notified_voting_start and contest.notified_result_announce
     assert effects == ["commit"] + [(contest.id, kind, NOW + timedelta(days=1, hours=hours))
                                    for kind, hours in [("post_start", 0), ("voting_start", 1), ("result_announce", 2)]]
@@ -182,9 +182,9 @@ def test_null_json_keeps_admin_generic_failure(client, admin, contest_factory, m
     effects = observe_admin_effects(monkeypatch)
     path = "/api/admin/contests" + (f"/{contest.id}" if method == "put" else "")
     response = getattr(client, method)(path, data="null", content_type="application/json")
-    assert response.status_code == 500
-    assert response.get_json() == {"error": "Failed to update contest" if method == "put" else "Failed to create contest"}
-    assert effects == ["rollback"]
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Expected a JSON object"}
+    assert effects == []
 
 
 def test_delete_original_targets_and_order_leaves_related_data_and_child(client, admin, contest_factory, monkeypatch):
@@ -261,12 +261,14 @@ def test_schedule_timestamp_url_headers_and_exact_past_boundary(app, fixed_time,
     assert task["schedule_time"].ToDatetime(tzinfo=timezone.utc) == expected
 
 
-def test_schedule_missing_config_fallback_and_error_boundaries(app, fixed_time, fake_cloud_tasks, monkeypatch, capsys):
+def test_schedule_missing_config_fallback_and_error_boundaries(app, fixed_time, fake_cloud_tasks, monkeypatch, capsys, caplog):
+    caplog.set_level("INFO", logger="app")
     fixed_time(NOW)
     monkeypatch.setitem(current_app.config, "GCP_PROJECT_ID", "")
     cloud_tasks.schedule_contest_task(42, "post_start", NOW)
     fake_cloud_tasks.create_task.assert_not_called()
-    assert capsys.readouterr().out == "Skipping task scheduling for post_start - GCP configuration missing.\n"
+    assert capsys.readouterr().out == ""
+    assert "Task scheduling skipped; event=post_start; configuration missing" in caplog.text
     monkeypatch.setitem(current_app.config, "GCP_PROJECT_ID", "test")
     monkeypatch.setitem(current_app.config, "TASK_HANDLER_URL", "")
     monkeypatch.setitem(current_app.config, "GCR_URL", "https://fallback.example/")
@@ -274,7 +276,9 @@ def test_schedule_missing_config_fallback_and_error_boundaries(app, fixed_time, 
     assert cloud_tasks.schedule_contest_task(42, "post_start", NOW) is None
     assert fake_cloud_tasks.create_task.call_args.kwargs["request"]["task"]["http_request"]["url"] == (
         "https://fallback.example//api/tasks/contest/42/post_start")
-    assert capsys.readouterr().out == "Failed to create task for post_start: API failed\n"
+    assert capsys.readouterr().out == ""
+    assert "cloud_tasks.schedule_contest_task" in caplog.text and "RuntimeError" in caplog.text
+    assert "API failed" not in caplog.text
     fake_cloud_tasks.queue_path.side_effect = RuntimeError("queue failed")
     with pytest.raises(RuntimeError, match="queue failed"):
         cloud_tasks.schedule_contest_task(42, "post_start", NOW)

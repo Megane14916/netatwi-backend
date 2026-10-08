@@ -1,22 +1,26 @@
 """Persisted result generation, retrieval and API presentation data."""
 
-from datetime import datetime, timedelta, timezone
+from app.services.serialization import public_user, post_content
+
+from datetime import datetime, timezone
 
 from sqlalchemy import case, distinct, func
 from sqlalchemy.orm import joinedload
 
+from app.services import policies
+from app.services.transactions import lock_contest, rollback_on_failure
 from app.extensions import db
 from app.models import Bookmark, Comment, Contest, ContestResult, Post, User, Vote
 
 
-JST = timezone(timedelta(hours=9), "JST")
 
 
+@rollback_on_failure
 def generate_contest_results(contest_id, *, commit=True):
     """
     定期バッチ専用：結果を集計し、ContestResult に保存する。
     """
-    contest = Contest.query.get(contest_id)
+    contest = lock_contest(contest_id)
     if not contest:
         return None
 
@@ -126,15 +130,11 @@ def generate_contest_results(contest_id, *, commit=True):
         )
         results_to_insert.append(cr)
 
-    try:
-        db.session.bulk_save_objects(results_to_insert)
-        if commit:
-            db.session.commit()
-        else:
-            db.session.flush()
-    except Exception:
-        db.session.rollback()
-        raise
+    db.session.bulk_save_objects(results_to_insert)
+    if commit:
+        db.session.commit()
+    else:
+        db.session.flush()
 
 
 def get_cached_contest_results(contest_id):
@@ -158,7 +158,7 @@ def get_cached_contest_results(contest_id):
 def get_contest_results(id, user_id):
     c = Contest.query.get_or_404(id)
     now = datetime.now(timezone.utc)
-    if now < c.voting_end_time.replace(tzinfo=timezone.utc):
+    if not policies.has_reached(now, c.voting_end_time):
         return ({"error": "Voting ongoing"}), 403
 
     all_posts = (
@@ -200,24 +200,12 @@ def get_contest_results(id, user_id):
         # 審査員賞タブ表示用データ
         judge_awards_data.append(
             {
-                "judge": {
-                    "screen_name": judge_user.screen_name,
-                    "name": judge_user.name,
-                    "profile_image_url": judge_user.profile_image_url,
-                },
+                "judge": public_user(judge_user),
                 "comment": vote.judge_comment,
                 "post": {
                     "post_id": post.id,
-                    "content": post.content,
-                    "images": post.images,
-                    "user": {
-                        "screen_name": post.user.screen_name,
-                        "name": post.user.name,
-                        "profile_image_url": post.user.profile_image_url,
-                    },
-                    "created_at": post.created_at.replace(tzinfo=timezone.utc)
-                    .astimezone(JST)
-                    .isoformat(),
+                    **post_content(post),
+                    "user": public_user(post.user),
                 },
             }
         )
@@ -270,17 +258,9 @@ def get_contest_results(id, user_id):
             {
                 "rank": post_result["rank"],
                 "post_id": post.id,
-                "content": post.content,
-                "images": post.images,
-                "created_at": post.created_at.replace(tzinfo=timezone.utc)
-                .astimezone(JST)
-                .isoformat(),
+                **post_content(post),
                 "score": post_result["score"],
-                "user": {
-                    "screen_name": post.user.screen_name,
-                    "name": post.user.name,
-                    "profile_image_url": post.user.profile_image_url,
-                },
+                "user": public_user(post.user),
                 "voters": post_voters,
                 "bookmarkCount": post.bookmark_count,
                 "commentCount": post.comment_count,

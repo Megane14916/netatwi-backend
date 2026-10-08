@@ -1,14 +1,17 @@
 """Notification creation, listing and read-state services."""
 
-from datetime import datetime, timedelta, timezone
+from app.services.serialization import public_user, jst_iso
+
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import joinedload
 
+from app.services import policies
+from app.services.transactions import rollback_on_failure
 from app.extensions import db
 from app.models import Comment, Notification
 
 
-JST = timezone(timedelta(hours=9), "JST")
 
 
 def create_comment_notification(post, post_id, user_id):
@@ -16,8 +19,8 @@ def create_comment_notification(post, post_id, user_id):
     contest = post.contest
     now = datetime.now(timezone.utc)
     if (
-        now >= contest.voting_end_time.replace(tzinfo=timezone.utc)
-        and user_id != post.user_id
+        policies.has_reached(now, contest.voting_end_time)
+        and not policies.is_owner(post, user_id)
     ):
         notification = Notification(
             user_id=post.user_id,
@@ -31,7 +34,7 @@ def create_comment_notification(post, post_id, user_id):
 
 def create_like_notification(post, post_id, user_id, c):
     # 通知生成
-    if user_id != post.user_id:
+    if not policies.is_owner(post, user_id):
         notification = Notification(
             user_id=post.user_id,
             sender_id=user_id,
@@ -86,14 +89,8 @@ def get_notifications(user_id):
                 "is_read": n.is_read,
                 "post_id": n.post_id,
                 "contest_id": n.contest_id,
-                "created_at": n.created_at.replace(tzinfo=timezone.utc)
-                .astimezone(JST)
-                .isoformat(),
-                "sender": {
-                    "name": n.sender.name,
-                    "screen_name": n.sender.screen_name,
-                    "profile_image_url": n.sender.profile_image_url,
-                }
+                "created_at": jst_iso(n.created_at),
+                "sender": public_user(n.sender)
                 if n.sender
                 else None,
                 "post": {
@@ -120,6 +117,7 @@ def get_unread_notifications_count(user_id):
     return ({"unread_count": count})
 
 
+@rollback_on_failure
 def mark_notifications_read(user_id):
     Notification.query.filter_by(user_id=user_id, is_read=False).update(
         {"is_read": True}

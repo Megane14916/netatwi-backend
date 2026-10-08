@@ -8,11 +8,16 @@ Tasks integration using the active application configuration.
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
+from app.services import policies
+from app.diagnostics import log_failure
+from flask import current_app
+from app.services.transactions import lock_contest
 from app.integrations import cloud_tasks
 
 from app.extensions import db
 from app.models import Bookmark, Comment, Contest, ContestResult, Notification, Post, User, Vote
 from app.services import results as results_service
+from app.services.contest_validation import validate_contest
 
 
 
@@ -22,6 +27,7 @@ def get_contest(id):
 
 
 def create_contest(data):
+    data = validate_contest(data)
     has_qualifier = data.get("hasQualifier", False)
 
     # 通常/決勝の時刻をパース
@@ -186,6 +192,7 @@ def create_contest(data):
 
 
 def update_contest(contest, data):
+    data = validate_contest(data, contest)
     if "name" in data:
         contest.name = data["name"]
     if "theme" in data:
@@ -276,7 +283,7 @@ def delete_contest(id):
     Contest.query.filter_by(id=id).delete()
     db.session.commit()
 
-    print(f"--- Contest Deleted: ID={id} ---")
+    current_app.logger.info("Contest deleted; contest_id=%s", id)
     return ({"message": "大会が正常に削除されました。"}), 200
 
 
@@ -294,7 +301,7 @@ def _rollback_on_failure(operation):
 
 @_rollback_on_failure
 def handle_contest_task(id, event_type):
-    contest = Contest.query.get(id)
+    contest = lock_contest(id)
     if not contest:
         return ({"error": "Contest not found"}), 404
 
@@ -304,7 +311,7 @@ def handle_contest_task(id, event_type):
     if event_type == "post_start":
         if (
             contest.start_time
-            and now >= contest.start_time.replace(tzinfo=timezone.utc)
+            and policies.has_reached(now, contest.start_time)
             and not contest.notified_post_start
         ):
             print(f"[{contest.id}] Post start notification (Cloud Tasks)")
@@ -324,7 +331,7 @@ def handle_contest_task(id, event_type):
     elif event_type == "voting_start":
         if (
             contest.end_time
-            and now >= contest.end_time.replace(tzinfo=timezone.utc)
+            and policies.has_reached(now, contest.end_time)
             and not contest.notified_voting_start
         ):
             print(f"[{contest.id}] Voting start notification (Cloud Tasks)")
@@ -344,7 +351,7 @@ def handle_contest_task(id, event_type):
     elif event_type == "result_announce":
         if (
             contest.voting_end_time
-            and now >= contest.voting_end_time.replace(tzinfo=timezone.utc)
+            and policies.has_reached(now, contest.voting_end_time)
             and not contest.notified_result_announce
         ):
             print(
@@ -378,16 +385,19 @@ def process_contests():
     """定期実行バッチ: 大会の状態変化を検知して通知送信や結果集計を行う"""
     print("--- process-contests batch started ---")
     now = datetime.now(timezone.utc)
-    contests = Contest.query.all()
+    contests = Contest.query.order_by(Contest.id).all()
     all_users = None
 
     for contest in contests:
+        contest = lock_contest(contest.id)
+        if contest is None:  # A concurrent admin deletion may have won the lock.
+            continue
         changed = False
 
         # 投稿開始
         if (
             contest.start_time
-            and contest.start_time.replace(tzinfo=timezone.utc) <= now
+            and policies.has_reached(now, contest.start_time)
             and not contest.notified_post_start
         ):
             print(f"[{contest.id}] Post start notification")
@@ -405,7 +415,7 @@ def process_contests():
         # 投票開始
         if (
             contest.end_time
-            and contest.end_time.replace(tzinfo=timezone.utc) <= now
+            and policies.has_reached(now, contest.end_time)
             and not contest.notified_voting_start
         ):
             print(f"[{contest.id}] Voting start notification")
@@ -423,7 +433,7 @@ def process_contests():
         # 結果発表
         if (
             contest.voting_end_time
-            and contest.voting_end_time.replace(tzinfo=timezone.utc) <= now
+            and policies.has_reached(now, contest.voting_end_time)
             and not contest.notified_result_announce
         ):
             print(f"[{contest.id}] Result announce notification & calculation")
@@ -456,6 +466,6 @@ def process_contests():
             print(f"Deleted {deleted_count} old notifications (older than 30 days)")
     except Exception as e:
         db.session.rollback()
-        print(f"Failed to delete old notifications: {e}")
+        log_failure("contest_lifecycle.cleanup_notifications", e)
 
     print("--- process-contests batch completed ---")

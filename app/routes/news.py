@@ -1,11 +1,14 @@
 """Public and administrative news routes."""
 
-import os
+from werkzeug.exceptions import HTTPException
+from app.diagnostics import log_failure
 
 from flask import jsonify, request, session
 
 from app.extensions import db
 from app.services import news as news_service
+from app.services import policies
+from app.services.validation import json_object
 from flask import Blueprint
 
 
@@ -17,73 +20,62 @@ def get_news():
     try:
         payload, status = news_service.get_news()
         return jsonify(payload), status
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"!!! ERROR at GET /api/news: {e}")
+        db.session.rollback()
+        log_failure("news.get_news", e)
         return jsonify({"error": "ニュースの取得に失敗しました。"}), 500
 
 
 @bp.route("/api/admin/news", methods=["GET"])
 def get_admin_news():
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
-    allowed_admins = [
-        s.strip()
-        for s in os.environ.get(
-            "ADMIN_SCREEN_NAMES", "dummy_admin1,dummy_admin2"
-        ).split(",")
-        if s.strip()
-    ]
-    if session.get("screen_name") not in allowed_admins:
+    if not policies.is_admin(session):
         return jsonify({"error": "Forbidden: Admins only"}), 403
     try:
         payload, status = news_service.get_admin_news()
         return jsonify(payload), status
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"!!! ERROR at GET /api/admin/news: {e}")
+        db.session.rollback()
+        log_failure("news.get_admin_news", e)
         return jsonify({"error": "ニュースの取得に失敗しました。"}), 500
 
 
 @bp.route("/api/admin/news", methods=["POST"])
 def add_news():
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
-    allowed_admins = [
-        s.strip()
-        for s in os.environ.get(
-            "ADMIN_SCREEN_NAMES", "dummy_admin1,dummy_admin2"
-        ).split(",")
-        if s.strip()
-    ]
-    if session.get("screen_name") not in allowed_admins:
+    if not policies.is_admin(session):
         return jsonify({"error": "Forbidden: Admins only"}), 403
+    data = json_object()
     try:
-        data = request.json
         tweet_id = data.get("tweet_id")
         payload, status = news_service.add_news(tweet_id)
         return jsonify(payload), status
+    except HTTPException:
+        raise
     except Exception as e:
+        log_failure("news.add_news", e)
         db.session.rollback()
-        print(f"!!! ERROR at POST /api/admin/news: {e}")
         return jsonify({"error": "ニュースの追加に失敗しました。"}), 500
 
 
 @bp.route("/api/admin/news/<int:id>", methods=["DELETE"])
 def delete_news(id):
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "Login required"}), 401
-    allowed_admins = [
-        s.strip()
-        for s in os.environ.get(
-            "ADMIN_SCREEN_NAMES", "dummy_admin1,dummy_admin2"
-        ).split(",")
-        if s.strip()
-    ]
-    if session.get("screen_name") not in allowed_admins:
+    if not policies.is_admin(session):
         return jsonify({"error": "Forbidden: Admins only"}), 403
     try:
         payload, status = news_service.delete_news(id)
         return jsonify(payload), status
+    except HTTPException:
+        raise
     except Exception as e:
+        log_failure("news.delete_news", e)
         db.session.rollback()
-        print(f"!!! ERROR at DELETE /api/admin/news/{id}: {e}")
         return jsonify({"error": "ニュースの削除に失敗しました。"}), 500

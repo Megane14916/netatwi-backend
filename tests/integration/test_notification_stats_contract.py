@@ -98,11 +98,9 @@ def test_notification_creation_failure_keeps_existing_error_boundary(
 
     monkeypatch.setattr(db.session, "add", reject_notification)
     if kind == "comment":
-        with pytest.raises(RuntimeError, match="notification failure"):
-            client.post(f"/api/posts/{post.id}/comments", json={"content": "Comment"})
-        assert events == ["Comment", "notification failure"]
-        # The route itself does not roll back; discard pending fixture writes here.
-        db.session.rollback()
+        response = client.post(f"/api/posts/{post.id}/comments", json={"content": "Comment"})
+        assert response.status_code == 500 and response.get_json() == {"error": "Internal server error"}
+        assert events == ["Comment", "notification failure", "rollback", "rollback"]
     else:
         response = client.put(f"/api/posts/{post.id}/like")
         assert response.status_code == 500
@@ -186,7 +184,7 @@ def test_mark_read_commits_once_even_when_no_unread_rows(
     assert Notification.query.filter_by(user_id=other.id, is_read=False).count() == (0 if empty else 1)
 
 
-def test_mark_read_commit_failure_propagates_without_route_rollback(
+def test_mark_read_commit_failure_returns_json_and_rolls_back(
     client, user_factory, login, monkeypatch
 ):
     recipient = user_factory("recipient")
@@ -202,10 +200,9 @@ def test_mark_read_commit_failure_propagates_without_route_rollback(
         raise RuntimeError("commit failure")
 
     monkeypatch.setattr(db.session, "commit", fail_commit)
-    with pytest.raises(RuntimeError, match="commit failure"):
-        client.post("/api/notifications/read")
-    assert events == ["commit failure"]
-    db.session.rollback()
+    response = client.post("/api/notifications/read")
+    assert response.status_code == 500 and response.get_json() == {"error": "Internal server error"}
+    assert events == ["commit failure", "rollback", "rollback"]
     assert db.session.get(Notification, notification_id).is_read is False
 
 
@@ -288,6 +285,5 @@ def test_stats_commit_failure_propagates_without_completion_or_rollback(
     assert isinstance(result.exception, RuntimeError)
     assert str(result.exception) == "commit failure"
     assert result.output == "--- update-user-stats batch started ---\n"
-    assert events == ["UserStats", "commit failure"]
-    db.session.rollback()
+    assert events == ["UserStats", "commit failure", "rollback"]
     assert UserStats.query.count() == 0

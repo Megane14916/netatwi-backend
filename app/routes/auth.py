@@ -1,12 +1,16 @@
 """HTTP input/output for X OAuth and judge authentication."""
 
-import traceback
+from werkzeug.exceptions import HTTPException
+from app.diagnostics import log_failure
+
 
 from flask import current_app, jsonify, redirect, request, session
 
 from app.extensions import limiter
 from app.extensions import db
 from app.services import auth as auth_service
+from app.services import policies
+from app.services.validation import json_object
 from flask import Blueprint
 
 
@@ -52,14 +56,16 @@ def twitter_callback():
 @bp.route("/api/contests/<int:id>/judge/login", methods=["POST"])
 @limiter.limit("5 per minute")
 def judge_login(id):
-    if "user_id" not in session:
+    if not policies.is_authenticated(session):
         return jsonify({"error": "ログインが必要です。"}), 401
 
-    data = request.get_json()
+    data = json_object()
     password = data.get("password")
 
     if not password:
         return jsonify({"error": "パスワードを入力してください。"}), 400
+    if not isinstance(password, str) or len(password) > 120:
+        return jsonify({"error": "パスワードは120文字以内の文字列で入力してください。"}), 400
 
     try:
         result = auth_service.authenticate_judge(id, password)
@@ -70,7 +76,9 @@ def judge_login(id):
         if result == "authenticated":
             return jsonify({"redirectUrl": f"/venue/{id}"}), 200
         return jsonify({"error": "パスワードが正しくありません。"}), 401
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"!!! ERROR at POST /api/contests/{id}/judge/login: {e}")
-        traceback.print_exc()
+        db.session.rollback()
+        log_failure("auth.judge_login", e)
         return jsonify({"error": "審査員認証中にエラーが発生しました。"}), 500
