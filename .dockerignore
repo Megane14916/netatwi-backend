@@ -1,1 +1,56 @@
+# Environment files and local credentials
+**/.env*
+!.env.example
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/id_rsa*
+**/id_ed25519*
+**/*credentials*.json
+**/*service-account*.json
+**/*service_account*.json
+.aws/
+.gcloud/
+.config/gcloud/
+
+# Repository, CI and editor metadata
+.git/
+.github/
+.gitignore
+.vscode/
+.idea/
+.agent/
+.agents/
+.codex/
+
+# Python environments and generated tooling output
+venv/
+.venv/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage*
+coverage/
+htmlcov/
+
+# Local databases, uploads, backups and logs
+instance/
+static/uploads/
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite-*
+**/*.sqlite3
+**/*.sqlite3-*
+**/*.sql
+**/*.dump
+**/*.bak
+**/*.log
+
+# Development-only files (keep app/ and migrations/ for runtime operations)
 /scripts/
+/tests/
+/docs/
